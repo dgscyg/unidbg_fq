@@ -1,0 +1,9 @@
+.agent/
+.agents/
+.claude/
+.codex/
+.cursor/
+.trellis/
+target/
+trace_output/
+AGENTS.md
