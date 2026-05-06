@@ -20,8 +20,7 @@ RUN apt-get update && apt-get install -y \
 ENV MAVEN_HOME=/opt/apache-maven-3.9.10
 
 RUN git clone https://gh-proxy.org/https://github.com/dgscyg/unidbg_fq.git /app/unidbg
-# 下载运行脚本 ———— 注意已经在本仓库根目录下，需修改成拷贝
-RUN curl -o /app/unidbg_onekey.sh https://cccimg.com/down.php/a13d9b6fc894a6ab842e9e968592f2f1.sh
+COPY unidbg_onekey.sh /app/unidbg_onekey.sh
 # 编译项目
 WORKDIR /app/unidbg
 RUN mvn -q -DskipTests package \
