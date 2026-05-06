@@ -187,6 +187,6 @@ wait $WEB_PID\n\
 ' > /app/start.sh && chmod +x /app/start.sh
 RUN bash -c 'sed -n "/^cat << .EOF_INDEX_HTML/,/^EOF_INDEX_HTML$/p" /app/unidbg_onekey.sh | tail -n +2 | head -n -1 > /app/index.html'
 # 暴露端口
-EXPOSE 7860
+EXPOSE 7860 9999
 # 启动命令
 CMD ["/app/start.sh"]
