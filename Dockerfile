@@ -4,6 +4,10 @@ ENV LANG=C.UTF-8
 ENV LC_ALL=C.UTF-8
 WORKDIR /app
 
+# 使用国内镜像源加速
+RUN sed -i 's|http://archive.ubuntu.com|https://mirrors.tuna.tsinghua.edu.cn|g' /etc/apt/sources.list.d/ubuntu.sources 2>/dev/null || \
+    sed -i 's|http://archive.ubuntu.com|https://mirrors.tuna.tsinghua.edu.cn|g' /etc/apt/sources.list 2>/dev/null || true
+
 # 安装系统依赖 + 手动安装 Maven 3.9.10
 RUN apt-get update && apt-get install -y \
     git \
@@ -13,7 +17,7 @@ RUN apt-get update && apt-get install -y \
     unzip \
     lsof \
     && rm -rf /var/lib/apt/lists/* \
-    && curl -fsSL https://archive.apache.org/dist/maven/maven-3/3.9.10/binaries/apache-maven-3.9.10-bin.tar.gz \
+    && curl -fsSL https://mirrors.tuna.tsinghua.edu.cn/apache/maven/maven-3/3.9.10/binaries/apache-maven-3.9.10-bin.tar.gz \
        | tar -xzC /opt \
     && ln -s /opt/apache-maven-3.9.10/bin/mvn /usr/local/bin/mvn
 
@@ -21,6 +25,10 @@ ENV MAVEN_HOME=/opt/apache-maven-3.9.10
 
 RUN git clone https://gh-proxy.org/https://github.com/dgscyg/unidbg_fq.git /app/unidbg
 COPY unidbg_onekey.sh /app/unidbg_onekey.sh
+# 配置 Maven 阿里云镜像加速依赖下载
+RUN mkdir -p /root/.m2 \
+    && printf '<?xml version="1.0" encoding="UTF-8"?>\n<settings xmlns="http://maven.apache.org/SETTINGS/1.2.0"\n  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"\n  xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.2.0 https://maven.apache.org/xsd/settings-1.2.0.xsd">\n  <mirrors>\n    <mirror>\n      <id>aliyunmaven</id>\n      <mirrorOf>*</mirrorOf>\n      <name>aliyun maven</name>\n      <url>https://maven.aliyun.com/repository/public</url>\n    </mirror>\n  </mirrors>\n</settings>\n' > /root/.m2/settings.xml
+
 # 编译项目
 WORKDIR /app/unidbg
 RUN mvn -q -DskipTests package \
