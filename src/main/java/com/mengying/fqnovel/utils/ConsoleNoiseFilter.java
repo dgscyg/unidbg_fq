@@ -55,7 +55,8 @@ public final class ConsoleNoiseFilter {
     }
 
     private static void installNativeStderrFilter(Charset charset) {
-        if (!NativeStderrFilter.isSupportedPlatform()) {
+        String osName = System.getProperty("os.name", "");
+        if (osName.toLowerCase().contains("win")) {
             return;
         }
         if (!NATIVE_STDERR_FILTER_INSTALLED.compareAndSet(false, true)) {
