@@ -796,7 +796,7 @@ public class TTEncrypt {
      */
     private int[] hex_27E(int[] param_list) {
         // Use ArrayList for dynamic growth (Python: param_list = param_list + [r3, r0])
-        int[] arr = Arrays.copyOf(param_list, 16);  // start with 16 ints (8 pairs)
+        int[] arr = Arrays.copyOf(param_list, 32);  // 16 x 64-bit words = 32 ints
         int r6 = arr[0], r8 = arr[1];
 
         for (int i = 0; i < 0x40; i++) {
