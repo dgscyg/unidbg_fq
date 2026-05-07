@@ -17,7 +17,7 @@ RUN apt-get update && apt-get install -y \
     unzip \
     lsof \
     && rm -rf /var/lib/apt/lists/* \
-    && curl -fsSL https://mirrors.tuna.tsinghua.edu.cn/apache/maven/maven-3/3.9.10/binaries/apache-maven-3.9.10-bin.tar.gz \
+    && curl -fsSL https://archive.apache.org/dist/maven/maven-3/3.9.10/binaries/apache-maven-3.9.10-bin.tar.gz \
        | tar -xzC /opt \
     && ln -s /opt/apache-maven-3.9.10/bin/mvn /usr/local/bin/mvn
 
