@@ -17,6 +17,10 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -35,10 +39,12 @@ public class FQSearchController {
 
     private final FQSearchService fqSearchService;
     private final FQDirectoryService fqDirectoryService;
+    private final ObjectMapper objectMapper;
 
-    public FQSearchController(FQSearchService fqSearchService, FQDirectoryService fqDirectoryService) {
+    public FQSearchController(FQSearchService fqSearchService, FQDirectoryService fqDirectoryService, ObjectMapper objectMapper) {
         this.fqSearchService = fqSearchService;
         this.fqDirectoryService = fqDirectoryService;
+        this.objectMapper = objectMapper;
     }
 
     /**
@@ -113,13 +119,79 @@ public class FQSearchController {
     }
 
     /**
+     * 兼容书源的搜索接口 -- 返回番茄API原始格式（search_tabs）。
+     * 路径: /api/fqsearch/books?query=末日&tabType=3&offset=0&count=20
+     */
+    @GetMapping("/api/fqsearch/books")
+    public CompletableFuture<Map<String, Object>> searchBooksLegacy(
+            @RequestParam String query,
+            @RequestParam(defaultValue = "0") Integer offset,
+            @RequestParam(defaultValue = "20") Integer count,
+            @RequestParam(defaultValue = "3") Integer tabType) {
+
+        if (log.isDebugEnabled()) {
+            log.debug("兼容搜索 - query: {}, offset: {}, count: {}, tabType: {}", query, offset, count, tabType);
+        }
+
+        String trimmedQuery = Texts.trimToNull(query);
+        if (!Texts.hasText(trimmedQuery)) {
+            return CompletableFuture.completedFuture(errorMap("搜索关键词不能为空"));
+        }
+        if (trimmedQuery.length() > MAX_QUERY_LENGTH) {
+            return CompletableFuture.completedFuture(errorMap("搜索关键词过长"));
+        }
+        if (offset == null || offset < 0) {
+            return CompletableFuture.completedFuture(errorMap("offset 不能为负数"));
+        }
+        if (count == null || count < 1 || count > MAX_PAGE_SIZE) {
+            return CompletableFuture.completedFuture(errorMap("count 超出范围（1-50）"));
+        }
+        if (tabType == null || tabType < 1 || tabType > MAX_TAB_TYPE) {
+            return CompletableFuture.completedFuture(errorMap("tabType 超出范围"));
+        }
+
+        FQSearchRequest searchRequest = new FQSearchRequest();
+        searchRequest.setQuery(trimmedQuery);
+        searchRequest.setOffset(offset);
+        searchRequest.setCount(count);
+        searchRequest.setTabType(tabType);
+        searchRequest.setPassback(offset);
+
+        return fqSearchService.searchRaw(searchRequest)
+            .thenApply(jsonNode -> {
+                Map<String, Object> result = new LinkedHashMap<>();
+                if (jsonNode == null) {
+                    result.put("code", -1);
+                    result.put("message", "搜索失败");
+                    return result;
+                }
+                result.put("code", 0);
+                try {
+                    result.put("data", objectMapper.treeToValue(jsonNode, Object.class));
+                } catch (Exception e) {
+                    log.warn("JSON转换失败", e);
+                    result.put("code", -1);
+                    result.put("message", "响应转换失败");
+                }
+                return result;
+            });
+    }
+
+    private static Map<String, Object> errorMap(String message) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("code", -1);
+        result.put("message", message);
+        return result;
+    }
+
+    /**
      * 获取书籍目录
      * 路径: /toc/{bookId}（bookId 仅允许数字）
      *
      * @param bookId 书籍ID
      * @return 书籍目录
      */
-    @GetMapping("/toc/{bookId:\\d+}")
+    @GetMapping("/toc/{bookId:\\\\d+}")
     public CompletableFuture<FQNovelResponse<FQDirectoryResponse>> getBookToc(
             @PathVariable String bookId) {
 
