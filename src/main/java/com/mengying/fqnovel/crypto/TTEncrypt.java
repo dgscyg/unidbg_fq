@@ -1674,11 +1674,12 @@ public class TTEncrypt {
             int v_338 = R1;
             R4 = R4 ^ R8;
             R12 = R5 ^ LR;
+            int R3, R9, R0, R10;
 
             for (int j = 0; j < 5; j++) {
-                int R3 = v_33C;
-                int R9 = R4;
-                int R0 = UBFX(R12, 0x10, 8);
+                R3 = v_33C;
+                R9 = R4;
+                R0 = UBFX(R12, 0x10, 8);
                 R1 = R3 >>> 24;
                 R1 = DWORD_6[R1];
                 R0 = DWORD_7[R0];

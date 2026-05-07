@@ -87,7 +87,11 @@ public class SignProxyController {
 
             String url = (String) signBody.get("url");
             Map<String, Object> device = (Map<String, Object>) signBody.get("device");
-            Map<String, String> params = (Map<String, String>) signBody.get("params");
+            Map<String, String> params = null;
+            Object paramsObj = signBody.get("params");
+            if (paramsObj instanceof Map) {
+                params = (Map<String, String>) paramsObj;
+            }
             String cookie = (String) signBody.get("cookie");
             Object bodyParam = signBody.get("body");
             String headerParam = (String) signBody.get("header");
@@ -111,20 +115,17 @@ public class SignProxyController {
                 fullUrl = sb.toString();
             }
 
-            // Build headers for signing
-            StringBuilder headersBuilder = new StringBuilder();
-            headersBuilder.append("User-Agent").append("\r\n");
-            headersBuilder.append("okhttp/3.12.13.4").append("\r\n");
+            Map<String, String> signHeadersMap = new LinkedHashMap<>();
+            signHeadersMap.put("User-Agent", "okhttp/3.12.13.4");
             if (cookie != null && !cookie.isEmpty()) {
-                headersBuilder.append("Cookie").append("\r\n");
-                headersBuilder.append(cookie).append("\r\n");
+                signHeadersMap.put("Cookie", cookie);
             }
 
             // Generate signature headers
             Map<String, String> signedHeaders;
             try {
                 signedHeaders = encryptWorker.generateSignatureHeadersSync(
-                    fullUrl, headersBuilder.toString());
+                    fullUrl, signHeadersMap);
             } catch (Exception sigErr) {
                 log.warn("sign: signing failed for url={}, falling back to unsigned", url, sigErr);
                 signedHeaders = new LinkedHashMap<>();
