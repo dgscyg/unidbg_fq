@@ -17,10 +17,6 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import java.util.LinkedHashMap;
-import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -39,12 +35,10 @@ public class FQSearchController {
 
     private final FQSearchService fqSearchService;
     private final FQDirectoryService fqDirectoryService;
-    private final ObjectMapper objectMapper;
 
-    public FQSearchController(FQSearchService fqSearchService, FQDirectoryService fqDirectoryService, ObjectMapper objectMapper) {
+    public FQSearchController(FQSearchService fqSearchService, FQDirectoryService fqDirectoryService) {
         this.fqSearchService = fqSearchService;
         this.fqDirectoryService = fqDirectoryService;
-        this.objectMapper = objectMapper;
     }
 
     /**
@@ -119,11 +113,11 @@ public class FQSearchController {
     }
 
     /**
-     * 兼容书源的搜索接口 -- 返回番茄API原始格式（search_tabs）。
+     * 兼容书源的搜索接口 -- 返回结构化搜索结果。
      * 路径: /api/fqsearch/books?query=末日&tabType=3&offset=0&count=20
      */
     @GetMapping("/api/fqsearch/books")
-    public CompletableFuture<Map<String, Object>> searchBooksLegacy(
+    public CompletableFuture<FQNovelResponse<FQSearchResponse>> searchBooksLegacy(
             @RequestParam String query,
             @RequestParam(defaultValue = "0") Integer offset,
             @RequestParam(defaultValue = "20") Integer count,
@@ -135,19 +129,19 @@ public class FQSearchController {
 
         String trimmedQuery = Texts.trimToNull(query);
         if (!Texts.hasText(trimmedQuery)) {
-            return CompletableFuture.completedFuture(errorMap("搜索关键词不能为空"));
+            return badRequest("搜索关键词不能为空");
         }
         if (trimmedQuery.length() > MAX_QUERY_LENGTH) {
-            return CompletableFuture.completedFuture(errorMap("搜索关键词过长"));
+            return badRequest("搜索关键词过长");
         }
         if (offset == null || offset < 0) {
-            return CompletableFuture.completedFuture(errorMap("offset 不能为负数"));
+            return badRequest("offset 不能为负数");
         }
         if (count == null || count < 1 || count > MAX_PAGE_SIZE) {
-            return CompletableFuture.completedFuture(errorMap("count 超出范围（1-50）"));
+            return badRequest("count 超出范围（1-50）");
         }
         if (tabType == null || tabType < 1 || tabType > MAX_TAB_TYPE) {
-            return CompletableFuture.completedFuture(errorMap("tabType 超出范围"));
+            return badRequest("tabType 超出范围");
         }
 
         FQSearchRequest searchRequest = new FQSearchRequest();
@@ -157,31 +151,19 @@ public class FQSearchController {
         searchRequest.setTabType(tabType);
         searchRequest.setPassback(offset);
 
-        return fqSearchService.searchRaw(searchRequest)
-            .thenApply(jsonNode -> {
-                Map<String, Object> result = new LinkedHashMap<>();
-                if (jsonNode == null) {
-                    result.put("code", -1);
-                    result.put("message", "搜索失败");
-                    return result;
+        return fqSearchService.searchBooksEnhanced(searchRequest)
+            .thenApply(response -> {
+                if (response == null) {
+                    return FQNovelResponse.<FQSearchResponse>error("搜索失败: 空响应");
                 }
-                result.put("code", 0);
-                try {
-                    result.put("data", objectMapper.treeToValue(jsonNode, Object.class));
-                } catch (Exception e) {
-                    log.warn("JSON转换失败", e);
-                    result.put("code", -1);
-                    result.put("message", "响应转换失败");
+                if (response.code() == null) {
+                    return FQNovelResponse.<FQSearchResponse>error("搜索失败: 响应码为空");
                 }
-                return result;
+                if (response.code() != 0) {
+                    return FQNovelResponse.error(response.code(), response.message());
+                }
+                return FQNovelResponse.success(response.data());
             });
-    }
-
-    private static Map<String, Object> errorMap(String message) {
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("code", -1);
-        result.put("message", message);
-        return result;
     }
 
     /**

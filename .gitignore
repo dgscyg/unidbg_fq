@@ -4,10 +4,12 @@
 .codex/
 .cursor/
 .trellis/
+.idea/
+.zed/
 target/
 trace_output/
 AGENTS.md
 read_source/
 Dockerfile.bak
-utils/
+/utils/
 logs/

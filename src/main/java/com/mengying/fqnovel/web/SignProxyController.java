@@ -2,15 +2,16 @@ package com.mengying.fqnovel.web;
 
 import com.mengying.fqnovel.service.DeviceRegistrationService;
 import com.mengying.fqnovel.service.FQEncryptServiceWorker;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
-
-import java.util.LinkedHashMap;
-import java.util.Map;
 
 /**
  * Sign proxy controller - replaces sg.52dns.cc API endpoints.
@@ -26,7 +27,9 @@ import java.util.Map;
 @RestController
 public class SignProxyController {
 
-    private static final Logger log = LoggerFactory.getLogger(SignProxyController.class);
+    private static final Logger log = LoggerFactory.getLogger(
+        SignProxyController.class
+    );
 
     private final FQEncryptServiceWorker encryptWorker;
     private final DeviceRegistrationService deviceRegistrationService;
@@ -72,21 +75,26 @@ public class SignProxyController {
      * </pre>
      */
     @SuppressWarnings("unchecked")
-    @PostMapping(value = "/api/sign",
-            consumes = MediaType.APPLICATION_JSON_VALUE,
-            produces = MediaType.APPLICATION_JSON_VALUE)
+    @PostMapping(
+        value = "/api/sign",
+        consumes = MediaType.APPLICATION_JSON_VALUE,
+        produces = MediaType.APPLICATION_JSON_VALUE
+    )
     public Map<String, Object> sign(@RequestBody Map<String, Object> request) {
         try {
+            log.warn("=== SIGN_DEBUG_V2 === request={}", request);
             // Extract body from request (Legado java.ajax format: {headers, body, method})
             Map<String, Object> signBody;
-            if (request.containsKey("body") && request.get("body") instanceof Map) {
+            if (
+                request.containsKey("body") &&
+                request.get("body") instanceof Map
+            ) {
                 signBody = (Map<String, Object>) request.get("body");
             } else {
                 signBody = request; // bare format
             }
 
             String url = (String) signBody.get("url");
-            Map<String, Object> device = (Map<String, Object>) signBody.get("device");
             Map<String, String> params = null;
             Object paramsObj = signBody.get("params");
             if (paramsObj instanceof Map) {
@@ -94,23 +102,26 @@ public class SignProxyController {
             }
             String cookie = (String) signBody.get("cookie");
             Object bodyParam = signBody.get("body");
-            String headerParam = (String) signBody.get("header");
 
             if (url == null || url.isEmpty()) {
                 return errorResponse(-1, "url is required");
             }
 
-            // Build full URL with params
+            // Build full URL with params (proper separator handling)
             String fullUrl = url;
             if (params != null && !params.isEmpty()) {
                 StringBuilder sb = new StringBuilder(url);
-                if (!url.contains("?")) sb.append("?");
-                else if (!url.endsWith("&")) sb.append("&");
-                boolean first = !url.contains("?");
+                boolean hasQuery = url.contains("?");
                 for (Map.Entry<String, String> e : params.entrySet()) {
-                    if (!first) sb.append("&");
-                    sb.append(e.getKey()).append("=").append(e.getValue());
-                    first = false;
+                    if (!hasQuery) {
+                        sb.append("?");
+                        hasQuery = true;
+                    } else {
+                        sb.append("&");
+                    }
+                    sb.append(URLEncoder.encode(e.getKey(), StandardCharsets.UTF_8))
+                      .append("=")
+                      .append(URLEncoder.encode(e.getValue(), StandardCharsets.UTF_8));
                 }
                 fullUrl = sb.toString();
             }
@@ -125,14 +136,26 @@ public class SignProxyController {
             Map<String, String> signedHeaders;
             try {
                 signedHeaders = encryptWorker.generateSignatureHeadersSync(
-                    fullUrl, signHeadersMap);
+                    fullUrl,
+                    signHeadersMap
+                );
             } catch (Exception sigErr) {
-                log.warn("sign: signing failed for url={}, falling back to unsigned", url, sigErr);
-                signedHeaders = new LinkedHashMap<>();
+                log.error("sign: signing exception for url={}", url, sigErr);
+                return errorResponse(-1, "签名异常: " + sigErr.getMessage());
+            }
+
+            if (signedHeaders == null || signedHeaders.isEmpty()) {
+                log.error(
+                    "sign: signing returned empty for url={}, inputHeaders={}",
+                    url,
+                    signHeadersMap
+                );
+                return errorResponse(-1, "签名生成失败");
             }
 
             // Determine method
-            boolean hasBody = bodyParam != null && !bodyParam.toString().isEmpty();
+            boolean hasBody =
+                bodyParam != null && !bodyParam.toString().isEmpty();
             String method = hasBody ? "POST" : "GET";
 
             // Build headers map for response
@@ -158,7 +181,6 @@ public class SignProxyController {
             Map<String, Object> result = new LinkedHashMap<>();
             result.put("data", data);
             return result;
-
         } catch (Exception e) {
             log.error("sign failed", e);
             return errorResponse(-1, "sign error: " + e.getMessage());
@@ -172,28 +194,34 @@ public class SignProxyController {
      * Response format: {data: {url, device, options: {body, headers, method}}}
      */
     @SuppressWarnings("unchecked")
-    @PostMapping(value = "/api/device/build-register",
-            consumes = MediaType.APPLICATION_JSON_VALUE,
-            produces = MediaType.APPLICATION_JSON_VALUE)
-    public Map<String, Object> buildRegister(@RequestBody Map<String, Object> request) {
+    @PostMapping(
+        value = "/api/device/build-register",
+        consumes = MediaType.APPLICATION_JSON_VALUE,
+        produces = MediaType.APPLICATION_JSON_VALUE
+    )
+    public Map<String, Object> buildRegister(
+        @RequestBody Map<String, Object> request
+    ) {
         try {
             Map<String, Object> regBody;
-            if (request.containsKey("body") && request.get("body") instanceof Map) {
+            if (
+                request.containsKey("body") &&
+                request.get("body") instanceof Map
+            ) {
                 regBody = (Map<String, Object>) request.get("body");
             } else {
                 regBody = request;
             }
 
-            Map<String, Object> device = (Map<String, Object>) regBody.get("device");
+            Map<String, Object> device = (Map<String, Object>) regBody.get(
+                "device"
+            );
             if (device == null) {
                 return errorResponse(-1, "device is required");
             }
 
-            // Log: user/auth are ignored (local service doesn't need auth)
-            Object user = regBody.get("user");
-            Object auth = regBody.get("auth");
-
-            Map<String, Object> regResult = deviceRegistrationService.buildRegisterRequest(device);
+            Map<String, Object> regResult =
+                deviceRegistrationService.buildRegisterRequest(device);
 
             // Response format matching sg.52dns.cc
             Map<String, Object> data = new LinkedHashMap<>();
@@ -204,7 +232,6 @@ public class SignProxyController {
             Map<String, Object> result = new LinkedHashMap<>();
             result.put("data", data);
             return result;
-
         } catch (Exception e) {
             log.error("build-register failed", e);
             return errorResponse(-1, "build-register error: " + e.getMessage());
@@ -217,24 +244,34 @@ public class SignProxyController {
      * Same format as build-register.
      */
     @SuppressWarnings("unchecked")
-    @PostMapping(value = "/api/device/build-activate",
-            consumes = MediaType.APPLICATION_JSON_VALUE,
-            produces = MediaType.APPLICATION_JSON_VALUE)
-    public Map<String, Object> buildActivate(@RequestBody Map<String, Object> request) {
+    @PostMapping(
+        value = "/api/device/build-activate",
+        consumes = MediaType.APPLICATION_JSON_VALUE,
+        produces = MediaType.APPLICATION_JSON_VALUE
+    )
+    public Map<String, Object> buildActivate(
+        @RequestBody Map<String, Object> request
+    ) {
         try {
             Map<String, Object> actBody;
-            if (request.containsKey("body") && request.get("body") instanceof Map) {
+            if (
+                request.containsKey("body") &&
+                request.get("body") instanceof Map
+            ) {
                 actBody = (Map<String, Object>) request.get("body");
             } else {
                 actBody = request;
             }
 
-            Map<String, Object> device = (Map<String, Object>) actBody.get("device");
+            Map<String, Object> device = (Map<String, Object>) actBody.get(
+                "device"
+            );
             if (device == null) {
                 return errorResponse(-1, "device is required");
             }
 
-            Map<String, Object> actResult = deviceRegistrationService.buildActivateRequest(device);
+            Map<String, Object> actResult =
+                deviceRegistrationService.buildActivateRequest(device);
 
             Map<String, Object> data = new LinkedHashMap<>();
             data.put("url", actResult.get("url"));
@@ -243,7 +280,6 @@ public class SignProxyController {
             Map<String, Object> result = new LinkedHashMap<>();
             result.put("data", data);
             return result;
-
         } catch (Exception e) {
             log.error("build-activate failed", e);
             return errorResponse(-1, "build-activate error: " + e.getMessage());

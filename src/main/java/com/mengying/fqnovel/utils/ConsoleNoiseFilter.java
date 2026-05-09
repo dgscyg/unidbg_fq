@@ -28,7 +28,7 @@ import static java.lang.foreign.ValueLayout.JAVA_LONG;
  */
 public final class ConsoleNoiseFilter {
     private static final String PROP_FILTER_CONSOLE_NOISE = "fq.log.filterConsoleNoise";
-    private static final String DEFAULT_FILTER_CONSOLE_NOISE = "true";
+    private static final String DEFAULT_FILTER_CONSOLE_NOISE = "false";
     private static final AtomicBoolean NATIVE_STDERR_FILTER_INSTALLED = new AtomicBoolean(false);
     private static final String EMPTY_NATIVE_ERROR_LINE = "[main]E/:";
 
