@@ -11,6 +11,8 @@ import java.lang.foreign.MemorySegment;
 import java.lang.foreign.SymbolLookup;
 import java.lang.invoke.MethodHandle;
 import java.nio.charset.Charset;
+import java.nio.file.Path;
+import java.util.Locale;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static java.lang.foreign.ValueLayout.ADDRESS;
@@ -28,9 +30,11 @@ import static java.lang.foreign.ValueLayout.JAVA_LONG;
  */
 public final class ConsoleNoiseFilter {
     private static final String PROP_FILTER_CONSOLE_NOISE = "fq.log.filterConsoleNoise";
-    private static final String DEFAULT_FILTER_CONSOLE_NOISE = "false";
+    private static final String DEFAULT_FILTER_CONSOLE_NOISE = "true";
     private static final AtomicBoolean NATIVE_STDERR_FILTER_INSTALLED = new AtomicBoolean(false);
     private static final String EMPTY_NATIVE_ERROR_LINE = "[main]E/:";
+    private static final boolean WINDOWS =
+        System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");
 
     private ConsoleNoiseFilter() {}
 
@@ -55,10 +59,6 @@ public final class ConsoleNoiseFilter {
     }
 
     private static void installNativeStderrFilter(Charset charset) {
-        String osName = System.getProperty("os.name", "");
-        if (osName.toLowerCase().contains("win")) {
-            return;
-        }
         if (!NATIVE_STDERR_FILTER_INSTALLED.compareAndSet(false, true)) {
             return;
         }
@@ -145,18 +145,57 @@ public final class ConsoleNoiseFilter {
 
     static final class NativeStderrFilter implements Runnable {
         private static final int STDERR_FD = 2;
+        private static final int STD_ERROR_HANDLE = -12;
         private static final int PIPE_READ_INDEX = 0;
         private static final int PIPE_WRITE_INDEX = 1;
         private static final int READ_BUFFER_SIZE = 1024;
+        private static final int WINDOWS_BINARY_MODE = 0x8000;
+        private static final long INVALID_OSFHANDLE = -1L;
 
         private static final Linker LINKER = Linker.nativeLinker();
-        private static final SymbolLookup LOOKUP = LINKER.defaultLookup();
-        private static final MethodHandle PIPE = downcall("pipe", FunctionDescriptor.of(JAVA_INT, ADDRESS));
-        private static final MethodHandle DUP = downcall("dup", FunctionDescriptor.of(JAVA_INT, JAVA_INT));
-        private static final MethodHandle DUP2 = downcall("dup2", FunctionDescriptor.of(JAVA_INT, JAVA_INT, JAVA_INT));
-        private static final MethodHandle READ = downcall("read", FunctionDescriptor.of(JAVA_LONG, JAVA_INT, ADDRESS, JAVA_LONG));
-        private static final MethodHandle WRITE = downcall("write", FunctionDescriptor.of(JAVA_LONG, JAVA_INT, ADDRESS, JAVA_LONG));
-        private static final MethodHandle CLOSE = downcall("close", FunctionDescriptor.of(JAVA_INT, JAVA_INT));
+        private static final SymbolLookup LOOKUP = createLookup();
+        private static final SymbolLookup KERNEL32 = WINDOWS
+            ? SymbolLookup.libraryLookup("kernel32.dll", Arena.global())
+            : null;
+        private static final MethodHandle PIPE = downcall(
+            WINDOWS ? "_pipe" : "pipe",
+            WINDOWS
+                ? FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_INT, JAVA_INT)
+                : FunctionDescriptor.of(JAVA_INT, ADDRESS)
+        );
+        private static final MethodHandle DUP = downcall(
+            WINDOWS ? "_dup" : "dup",
+            FunctionDescriptor.of(JAVA_INT, JAVA_INT)
+        );
+        private static final MethodHandle DUP2 = downcall(
+            WINDOWS ? "_dup2" : "dup2",
+            FunctionDescriptor.of(JAVA_INT, JAVA_INT, JAVA_INT)
+        );
+        private static final MethodHandle READ = downcall(
+            WINDOWS ? "_read" : "read",
+            WINDOWS
+                ? FunctionDescriptor.of(JAVA_INT, JAVA_INT, ADDRESS, JAVA_INT)
+                : FunctionDescriptor.of(JAVA_LONG, JAVA_INT, ADDRESS, JAVA_LONG)
+        );
+        private static final MethodHandle WRITE = downcall(
+            WINDOWS ? "_write" : "write",
+            WINDOWS
+                ? FunctionDescriptor.of(JAVA_INT, JAVA_INT, ADDRESS, JAVA_INT)
+                : FunctionDescriptor.of(JAVA_LONG, JAVA_INT, ADDRESS, JAVA_LONG)
+        );
+        private static final MethodHandle CLOSE = downcall(
+            WINDOWS ? "_close" : "close",
+            FunctionDescriptor.of(JAVA_INT, JAVA_INT)
+        );
+        private static final MethodHandle GET_OSFHANDLE = WINDOWS
+            ? downcall("_get_osfhandle", FunctionDescriptor.of(JAVA_LONG, JAVA_INT))
+            : null;
+        private static final MethodHandle GET_STD_HANDLE = WINDOWS
+            ? LINKER.downcallHandle(KERNEL32.findOrThrow("GetStdHandle"), FunctionDescriptor.of(ADDRESS, JAVA_INT))
+            : null;
+        private static final MethodHandle SET_STD_HANDLE = WINDOWS
+            ? LINKER.downcallHandle(KERNEL32.findOrThrow("SetStdHandle"), FunctionDescriptor.of(JAVA_INT, JAVA_INT, ADDRESS))
+            : null;
 
         private final int readFd;
         private final int originalErrFd;
@@ -168,19 +207,15 @@ public final class ConsoleNoiseFilter {
             this.charset = charset;
         }
 
-        static boolean isSupportedPlatform() {
-            String osName = System.getProperty("os.name", "");
-            return !osName.toLowerCase().contains("win");
-        }
-
         static void install(Charset charset) throws IOException {
             int readFd;
             int writeFd;
             int originalErrFd = -1;
+            long originalStdErrHandle = INVALID_OSFHANDLE;
 
             try (Arena arena = Arena.ofConfined()) {
                 MemorySegment pipeFds = arena.allocate(JAVA_INT.byteSize() * 2L, JAVA_INT.byteAlignment());
-                if (invokeInt(PIPE, pipeFds) != 0) {
+                if (invokePipe(pipeFds) != 0) {
                     throw new IOException("创建 stderr 管道失败");
                 }
                 readFd = pipeFds.get(JAVA_INT, PIPE_READ_INDEX * JAVA_INT.byteSize());
@@ -195,7 +230,11 @@ public final class ConsoleNoiseFilter {
                 if (invokeInt(DUP2, writeFd, STDERR_FD) < 0) {
                     throw new IOException("重定向 stderr 失败");
                 }
+                if (WINDOWS) {
+                    originalStdErrHandle = redirectWindowsStdErrHandle();
+                }
             } catch (IOException e) {
+                restoreWindowsStdErrHandle(originalStdErrHandle);
                 closeQuietly(readFd);
                 closeQuietly(writeFd);
                 closeQuietly(originalErrFd);
@@ -212,6 +251,7 @@ public final class ConsoleNoiseFilter {
                 thread.setDaemon(true);
                 thread.start();
             } catch (Throwable t) {
+                restoreWindowsStdErrHandle(originalStdErrHandle);
                 try {
                     invokeInt(DUP2, originalErrFd, STDERR_FD);
                 } catch (IOException ignored) {
@@ -229,7 +269,7 @@ public final class ConsoleNoiseFilter {
             try (Arena readArena = Arena.ofConfined()) {
                 MemorySegment nativeBuffer = readArena.allocate(READ_BUFFER_SIZE);
                 while (true) {
-                    long bytesRead = invokeLong(READ, readFd, nativeBuffer, (long) READ_BUFFER_SIZE);
+                    long bytesRead = invokeRead(readFd, nativeBuffer, READ_BUFFER_SIZE);
                     if (bytesRead <= 0) {
                         break;
                     }
@@ -282,7 +322,7 @@ public final class ConsoleNoiseFilter {
 
                 long offset = 0L;
                 while (offset < data.length) {
-                    long written = invokeLong(WRITE, fd, segment.asSlice(offset), (long) data.length - offset);
+                    long written = invokeWrite(fd, segment.asSlice(offset), (long) data.length - offset);
                     if (written <= 0) {
                         break;
                     }
@@ -291,8 +331,91 @@ public final class ConsoleNoiseFilter {
             }
         }
 
+        private static SymbolLookup createLookup() {
+            if (!WINDOWS) {
+                return LINKER.defaultLookup();
+            }
+            return createWindowsLookup();
+        }
+
+        private static SymbolLookup createWindowsLookup() {
+            String systemRoot = Texts.defaultIfBlank(System.getenv("SystemRoot"), "C:\\Windows");
+            Path system32 = Path.of(systemRoot, "System32");
+            Throwable lastError = null;
+            for (String candidate : new String[]{"ucrtbase.dll", "msvcrt.dll"}) {
+                try {
+                    return SymbolLookup.libraryLookup(system32.resolve(candidate), Arena.global());
+                } catch (Throwable t) {
+                    lastError = t;
+                }
+                try {
+                    return SymbolLookup.libraryLookup(candidate, Arena.global());
+                } catch (Throwable t) {
+                    lastError = t;
+                }
+            }
+            throw new IllegalStateException("无法加载 Windows CRT", lastError);
+        }
+
+        private static int invokePipe(MemorySegment pipeFds) throws IOException {
+            return WINDOWS
+                ? invokeInt(PIPE, pipeFds, READ_BUFFER_SIZE, WINDOWS_BINARY_MODE)
+                : invokeInt(PIPE, pipeFds);
+        }
+
+        private static long invokeRead(int fd, MemorySegment buffer, long size) throws IOException {
+            return WINDOWS
+                ? invokeInt(READ, fd, buffer, Math.toIntExact(size))
+                : invokeLong(READ, fd, buffer, size);
+        }
+
+        private static long invokeWrite(int fd, MemorySegment buffer, long size) throws IOException {
+            return WINDOWS
+                ? invokeInt(WRITE, fd, buffer, Math.toIntExact(size))
+                : invokeLong(WRITE, fd, buffer, size);
+        }
+
+        private static long redirectWindowsStdErrHandle() throws IOException {
+            long originalHandle = invokeAddress(GET_STD_HANDLE, STD_ERROR_HANDLE);
+            long redirectedHandle = invokeLong(GET_OSFHANDLE, STDERR_FD);
+            if (redirectedHandle == INVALID_OSFHANDLE) {
+                throw new IOException("获取重定向 stderr 句柄失败");
+            }
+            setWindowsStdErrHandle(redirectedHandle);
+            return originalHandle;
+        }
+
+        private static void restoreWindowsStdErrHandle(long handle) {
+            if (!WINDOWS || handle == INVALID_OSFHANDLE || handle == 0L) {
+                return;
+            }
+            try {
+                setWindowsStdErrHandle(handle);
+            } catch (IOException ignored) {
+                // ignore
+            }
+        }
+
+        private static void setWindowsStdErrHandle(long handle) throws IOException {
+            if (invokeInt(SET_STD_HANDLE, STD_ERROR_HANDLE, MemorySegment.ofAddress(handle)) == 0) {
+                throw new IOException("设置 Windows stderr 句柄失败");
+            }
+        }
+
         private static MethodHandle downcall(String symbol, FunctionDescriptor descriptor) {
             return LINKER.downcallHandle(LOOKUP.findOrThrow(symbol), descriptor);
+        }
+
+        private static long invokeAddress(MethodHandle handle, Object... args) throws IOException {
+            try {
+                Object value = handle.invokeWithArguments(args);
+                if (value instanceof MemorySegment segment) {
+                    return segment.address();
+                }
+                return ((Number) value).longValue();
+            } catch (Throwable t) {
+                throw new IOException("调用 native address 函数失败", t);
+            }
         }
 
         private static int invokeInt(MethodHandle handle, Object... args) throws IOException {
@@ -312,6 +435,9 @@ public final class ConsoleNoiseFilter {
         }
 
         private static void closeQuietly(int fd) {
+            if (fd < 0) {
+                return;
+            }
             try {
                 invokeInt(CLOSE, fd);
             } catch (IOException ignored) {
