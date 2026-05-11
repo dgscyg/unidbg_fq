@@ -54,6 +54,20 @@ public class ChapterContentBuilder {
      * @throws Exception 解密、解压或校验失败
      */
     public FQNovelChapterInfo buildChapterInfo(String bookId, String chapterId, ItemContent itemContent) throws Exception {
+        return buildChapterInfo(
+            bookId,
+            chapterId,
+            itemContent,
+            downloadProperties.getCache().isChapterIncludeRawContent()
+        );
+    }
+
+    public FQNovelChapterInfo buildChapterInfo(
+        String bookId,
+        String chapterId,
+        ItemContent itemContent,
+        boolean includeRawContent
+    ) throws Exception {
         if (itemContent == null) {
             throw new IllegalArgumentException("章节内容为空");
         }
@@ -75,7 +89,7 @@ public class ChapterContentBuilder {
             chapterId,
             itemContent,
             decryptedContent,
-            downloadProperties.getCache().isChapterIncludeRawContent()
+            includeRawContent
         );
     }
 

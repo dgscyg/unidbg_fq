@@ -6,6 +6,11 @@
 .trellis/
 .idea/
 .zed/
+node_modules/
+dist/
+*.tsbuildinfo
+fqnovel-mcp-ts/manual-output/
+fqnovel-mcp-ts/*.log
 target/
 trace_output/
 AGENTS.md
