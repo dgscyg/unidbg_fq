@@ -157,11 +157,12 @@ RETURNING id
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="批量注册设备并补充 PostgreSQL 设备池")
     parser.add_argument("--db-url", default=os.getenv("DB_URL", ""), help="PostgreSQL 连接串，默认优先读取 DB_URL，其次读取仓库根目录 .env")
-    parser.add_argument("--count", type=int, default=5, help="要生成并注册的设备数量，默认 5")
+    parser.add_argument("--count", type=int, default=5, help="目标成功写库的设备数量，默认 5")
     parser.add_argument("--name-prefix", default="seed", help="设备名称前缀，默认 seed")
     parser.add_argument("--source", default="seed-script", help="写入 device_pool.source 的来源标识")
     parser.add_argument("--delay-min", type=float, default=3.0, help="两次注册之间的最小延迟秒数")
     parser.add_argument("--delay-max", type=float, default=5.0, help="两次注册之间的最大延迟秒数")
+    parser.add_argument("--max-attempts", type=int, default=0, help="最大注册尝试次数；默认自动取 count 的 5 倍")
     parser.add_argument("--dry-run", action="store_true", help="仅生成映射与结果文件，不调用注册接口、不写数据库")
     return parser.parse_args()
 
@@ -276,6 +277,7 @@ def register_devices(args: argparse.Namespace) -> None:
     count = max(1, int(args.count or 1))
     delay_min = max(0.0, float(args.delay_min))
     delay_max = max(delay_min, float(args.delay_max))
+    max_attempts = count if args.dry_run else max(count, int(args.max_attempts or (count * 5)))
     batch_tag = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     conn: psycopg.Connection | None = None
@@ -290,20 +292,29 @@ def register_devices(args: argparse.Namespace) -> None:
     client = None if args.dry_run else EnhancedDeviceRegisterClient()
     results: List[Dict[str, Any]] = []
     xml_configs: List[Dict[str, Any]] = []
+    success_count = 0
+    attempt_count = 0
 
-    print(f"开始补池: count={count}, dry_run={args.dry_run}, source={args.source}")
+    print(
+        f"开始补池: target_count={count}, max_attempts={max_attempts}, dry_run={args.dry_run}, source={args.source}"
+    )
     if not args.dry_run:
         print("数据库 schema 已确认")
 
     try:
-        for index in range(1, count + 1):
-            device_name = build_device_name(args.name_prefix, batch_tag, index)
+        while attempt_count < max_attempts and (args.dry_run or success_count < count):
+            attempt_count += 1
+            device_name = build_device_name(args.name_prefix, batch_tag, attempt_count)
             device_info = ImprovedRandomDeviceGenerator.generate_random_device(
                 use_real_algorithm=True,
                 use_real_brand_model=True,
             )
 
-            print(f"\n--- 设备 {index}/{count}: {device_name} ---")
+            progress_index = attempt_count if args.dry_run else success_count + 1
+            print(
+                f"\n--- 设备 {progress_index}/{count}: {device_name} "
+                f"(attempt {attempt_count}/{max_attempts}) ---"
+            )
 
             if args.dry_run:
                 record = build_record(device_info, device_name, args.source)
@@ -313,6 +324,7 @@ def register_devices(args: argparse.Namespace) -> None:
                     {
                         "timestamp": datetime.now(timezone.utc).isoformat(),
                         "device_name": device_name,
+                        "attempt_index": attempt_count,
                         "dry_run": True,
                         "db_record": record,
                         "request": {"device_info": device_info},
@@ -323,23 +335,33 @@ def register_devices(args: argparse.Namespace) -> None:
             else:
                 assert client is not None
                 result = client.register_device(device_info)
+                result["device_name"] = device_name
+                result["attempt_index"] = attempt_count
                 results.append(result)
+
                 success = is_successful_registration(result, device_info)
                 if not success:
-                    print("注册失败或未拿到有效 install_id/device_id，跳过数据库写入")
+                    print(
+                        "注册失败或未拿到有效 install_id/device_id，跳过数据库写入 "
+                        f"(success={success_count}/{count}, attempt={attempt_count}/{max_attempts})"
+                    )
                 else:
                     xml_config = generate_xml_config(device_info)
                     xml_configs.append(xml_config)
                     record = build_record(device_info, device_name, args.source)
                     row_id = upsert_record(conn, record)
-                    result["device_name"] = device_name
                     result["db_record"] = record
                     result["db_row_id"] = row_id
+                    success_count += 1
                     print(
                         f"已写入设备池: row_id={row_id}, device_id={record['device_id']}, install_id={record['install_id']}"
                     )
+                    print(f"当前进度: success={success_count}/{count}, attempt={attempt_count}/{max_attempts}")
 
-            if index < count and delay_max > 0:
+            should_continue = (
+                attempt_count < max_attempts and (args.dry_run and attempt_count < count or (not args.dry_run and success_count < count))
+            )
+            if should_continue and delay_max > 0:
                 delay = random.uniform(delay_min, delay_max)
                 print(f"等待 {delay:.1f} 秒继续...")
                 time.sleep(delay)
@@ -348,10 +370,16 @@ def register_devices(args: argparse.Namespace) -> None:
             conn.close()
 
     full_file, xml_file = save_results(results, xml_configs, batch_tag)
+    successful = sum(
+        1 for item in results if is_successful_registration(item, ((item.get("request") or {}).get("device_info") or {}))
+    )
     print("\n补池完成")
     print(f"结果文件: {full_file}")
     print(f"YAML 文件: {xml_file}")
-    print(f"成功写库数量: {sum(1 for item in results if is_successful_registration(item, ((item.get('request') or {}).get('device_info') or {})))}")
+    print(f"成功写库数量: {successful}")
+    print(f"总尝试次数: {len(results)}")
+    if not args.dry_run and successful < count:
+        print(f"未达到目标成功数量: target={count}, actual={successful}, max_attempts={max_attempts}")
 
 
 def main() -> None:

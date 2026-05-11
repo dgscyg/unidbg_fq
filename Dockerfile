@@ -37,9 +37,13 @@ WORKDIR /app
 
 ENV TZ=Asia/Shanghai \
     SERVER_PORT=9999 \
+    LOG_DIR=/app/logs \
     SPRING_CONFIG_ADDITIONAL_LOCATION=file:/app/config/
 
 COPY --from=build /build/target/fqnovel.jar /app/fqnovel.jar
+
+RUN mkdir -p /app/logs /app/config \
+    && chown -R 65532:65532 /app
 
 USER 65532:65532
 
