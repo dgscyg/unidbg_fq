@@ -22,7 +22,7 @@
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
 
         <!-- 依赖版本管理 -->
-        <unidbg.version>0.9.9</unidbg.version>
+        <unidbg.version>0.9.8</unidbg.version>
         
         <!-- 插件版本管理 -->
         <maven-jar-plugin.version>3.5.0</maven-jar-plugin.version>

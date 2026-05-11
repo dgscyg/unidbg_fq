@@ -113,67 +113,13 @@ public class FQSearchController {
     }
 
     /**
-     * 兼容书源的搜索接口 -- 返回结构化搜索结果。
-     * 路径: /api/fqsearch/books?query=末日&tabType=3&offset=0&count=20
-     */
-    @GetMapping("/api/fqsearch/books")
-    public CompletableFuture<FQNovelResponse<FQSearchResponse>> searchBooksLegacy(
-            @RequestParam String query,
-            @RequestParam(defaultValue = "0") Integer offset,
-            @RequestParam(defaultValue = "20") Integer count,
-            @RequestParam(defaultValue = "3") Integer tabType) {
-
-        if (log.isDebugEnabled()) {
-            log.debug("兼容搜索 - query: {}, offset: {}, count: {}, tabType: {}", query, offset, count, tabType);
-        }
-
-        String trimmedQuery = Texts.trimToNull(query);
-        if (!Texts.hasText(trimmedQuery)) {
-            return badRequest("搜索关键词不能为空");
-        }
-        if (trimmedQuery.length() > MAX_QUERY_LENGTH) {
-            return badRequest("搜索关键词过长");
-        }
-        if (offset == null || offset < 0) {
-            return badRequest("offset 不能为负数");
-        }
-        if (count == null || count < 1 || count > MAX_PAGE_SIZE) {
-            return badRequest("count 超出范围（1-50）");
-        }
-        if (tabType == null || tabType < 1 || tabType > MAX_TAB_TYPE) {
-            return badRequest("tabType 超出范围");
-        }
-
-        FQSearchRequest searchRequest = new FQSearchRequest();
-        searchRequest.setQuery(trimmedQuery);
-        searchRequest.setOffset(offset);
-        searchRequest.setCount(count);
-        searchRequest.setTabType(tabType);
-        searchRequest.setPassback(offset);
-
-        return fqSearchService.searchBooksEnhanced(searchRequest)
-            .thenApply(response -> {
-                if (response == null) {
-                    return FQNovelResponse.<FQSearchResponse>error("搜索失败: 空响应");
-                }
-                if (response.code() == null) {
-                    return FQNovelResponse.<FQSearchResponse>error("搜索失败: 响应码为空");
-                }
-                if (response.code() != 0) {
-                    return FQNovelResponse.error(response.code(), response.message());
-                }
-                return FQNovelResponse.success(response.data());
-            });
-    }
-
-    /**
      * 获取书籍目录
      * 路径: /toc/{bookId}（bookId 仅允许数字）
      *
      * @param bookId 书籍ID
      * @return 书籍目录
      */
-    @GetMapping("/toc/{bookId:\\\\d+}")
+    @GetMapping("/toc/{bookId:\\d+}")
     public CompletableFuture<FQNovelResponse<FQDirectoryResponse>> getBookToc(
             @PathVariable String bookId) {
 

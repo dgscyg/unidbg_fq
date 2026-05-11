@@ -2,7 +2,6 @@ package com.mengying.fqnovel;
 
 import com.mengying.fqnovel.utils.ConsoleNoiseFilter;
 import com.mengying.fqnovel.utils.Texts;
-import java.net.InetAddress;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.Banner;
@@ -12,31 +11,28 @@ import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.core.env.Environment;
 
+import java.net.InetAddress;
+
 @ConfigurationPropertiesScan
 @EnableConfigurationProperties
 @SpringBootApplication(
-    scanBasePackages = { "com.mengying" },
+    scanBasePackages = {"com.mengying"},
     excludeName = {
         "org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration",
-        "org.springframework.boot.webmvc.autoconfigure.error.ErrorMvcAutoConfiguration",
+        "org.springframework.boot.webmvc.autoconfigure.error.ErrorMvcAutoConfiguration"
     }
 )
 public class UnidbgServerApplication {
 
-    private static final Logger log = LoggerFactory.getLogger(
-        UnidbgServerApplication.class
-    );
+    private static final Logger log = LoggerFactory.getLogger(UnidbgServerApplication.class);
 
     private static final String SERVER_PORT = "server.port";
-    private static final String SERVER_SERVLET_CONTEXT_PATH =
-        "server.servlet.context-path";
+    private static final String SERVER_SERVLET_CONTEXT_PATH = "server.servlet.context-path";
 
     public static void main(String[] args) {
         ConsoleNoiseFilter.install();
         preferLocalConfigIfPresent();
-        SpringApplication app = new SpringApplication(
-            UnidbgServerApplication.class
-        );
+        SpringApplication app = new SpringApplication(UnidbgServerApplication.class);
         app.setBannerMode(Banner.Mode.OFF);
         app.setLogStartupInfo(false);
         Environment env = app.run(args).getEnvironment();
@@ -71,23 +67,17 @@ public class UnidbgServerApplication {
             return;
         }
 
-        boolean hasLocalConfig =
-            new java.io.File("application.yml").isFile() ||
-            new java.io.File("application.yaml").isFile() ||
-            new java.io.File("application.properties").isFile();
+        boolean hasLocalConfig = new java.io.File("application.yml").isFile()
+            || new java.io.File("application.yaml").isFile()
+            || new java.io.File("application.properties").isFile();
 
         if (hasLocalConfig) {
             // 若本地存在配置文件：允许 file:./ 覆盖 classpath
-            System.setProperty(
-                "spring.config.location",
-                "optional:file:./,optional:classpath:/"
-            );
+            System.setProperty("spring.config.location",
+                "optional:file:./,optional:classpath:/");
         } else {
             // 本地没有配置文件：只读 classpath，避免扫描工作目录带来的不确定性
-            System.setProperty(
-                "spring.config.location",
-                "optional:classpath:/"
-            );
+            System.setProperty("spring.config.location", "optional:classpath:/");
         }
     }
 
@@ -96,11 +86,6 @@ public class UnidbgServerApplication {
         String contextPath = env.getProperty(SERVER_SERVLET_CONTEXT_PATH);
         contextPath = Texts.defaultIfBlank(contextPath, "/");
         String hostAddress = InetAddress.getLoopbackAddress().getHostAddress();
-        log.info(
-            "服务已启动: http://{}:{}{}",
-            hostAddress,
-            serverPort,
-            contextPath
-        );
+        log.info("服务已启动: http://{}:{}{}", hostAddress, serverPort, contextPath);
     }
 }

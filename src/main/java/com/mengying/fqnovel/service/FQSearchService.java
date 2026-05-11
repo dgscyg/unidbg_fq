@@ -340,37 +340,6 @@ public class FQSearchService {
         return copied;
     }
 
-    /**
-     * 原始搜索 — 跳过响应解析，直接返回番茄API原始JSON。
-     * 供 /api/fqsearch/books 兼容端点使用。
-     */
-    public CompletableFuture<JsonNode> searchRaw(FQSearchRequest searchRequest) {
-        return CompletableFuture.supplyAsync(() -> {
-            try {
-                FQSearchUpstreamRequest enriched = searchRequestEnricher.enrich(searchRequest);
-                ensurePassback(enriched);
-
-                String url = fqApiUtils.getSearchApiBaseUrl() + FQConstants.Search.TAB_PATH;
-                Map<String, String> params = fqApiUtils.buildSearchParams(enriched);
-                String fullUrl = fqApiUtils.buildUrlWithParams(url, params);
-
-                UpstreamSignedRequestService.UpstreamJsonResult upstream =
-                    upstreamSignedRequestService.executeSignedJsonGetOrLogFailure(
-                        fullUrl, fqApiUtils.buildSearchHeaders(), "原始搜索", log);
-
-                if (upstream == null || upstream.jsonBody() == null) {
-                    log.warn("searchRaw: 签名或上游请求失败");
-                    return null;
-                }
-                return upstream.jsonBody();
-            } catch (Exception e) {
-                log.error("searchRaw 失败 - query: {}",
-                    searchRequest == null ? null : searchRequest.getQuery(), e);
-                return null;
-            }
-        }, taskExecutor);
-    }
-
     private FQNovelResponse<FQSearchResponse> performSearchInternal(FQSearchUpstreamRequest searchRequest) {
         try {
             String url = fqApiUtils.getSearchApiBaseUrl() + FQConstants.Search.TAB_PATH;
