@@ -89,6 +89,7 @@ export interface DownloadChapter {
   chapterId: string;
   title: string;
   content: string;
+  contentStyle: ContentStyle;
   rawContent?: string;
   wordCount?: number;
   nextChapterId?: string;
@@ -96,6 +97,7 @@ export interface DownloadChapter {
   isFree?: boolean;
 }
 
+export type ContentStyle = "txt" | "html";
 export type OutputFormat = "txt" | "json";
 export type BinaryOutputFormat = "epub";
 
@@ -118,6 +120,7 @@ export interface DownloadResult {
     totalSelected: number;
     totalAvailable: number;
   };
+  contentStyle: ContentStyle;
   batchInfo: BatchRequestInfo;
   chapters: DownloadChapter[];
   aggregateText?: string;
@@ -132,6 +135,7 @@ export interface EpubResult {
     totalSelected: number;
     totalAvailable: number;
   };
+  contentStyle: ContentStyle;
   batchInfo: BatchRequestInfo;
   output: DownloadOutput;
   coverUrl?: string;
@@ -145,6 +149,7 @@ export interface DownloadOptions {
   endChapter?: number;
   concurrency?: number;
   includeRawContent?: boolean;
+  useHtmlStyle?: boolean;
   aggregateText?: boolean;
   outputPath?: string;
   outputFormat?: OutputFormat;
@@ -155,5 +160,6 @@ export interface EpubOptions {
   startChapter?: number;
   endChapter?: number;
   concurrency?: number;
+  useHtmlStyle?: boolean;
   outputPath?: string;
 }

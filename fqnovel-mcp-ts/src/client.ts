@@ -94,9 +94,20 @@ export class FqNovelClient {
     return this.request<BookInfo>(`/book/${encodeURIComponent(bookId)}`);
   }
 
-  async getChapter(bookId: string, chapterId: string): Promise<ChapterInfo> {
+  async getChapter(
+    bookId: string,
+    chapterId: string,
+    includeRawContent = false,
+    useHtmlStyle = false,
+  ): Promise<ChapterInfo> {
     return this.request<ChapterInfo>(
       `/chapter/${encodeURIComponent(bookId)}/${encodeURIComponent(chapterId)}`,
+      {
+        query: {
+          includeRawContent: includeRawContent || useHtmlStyle || undefined,
+          useHtmlStyle: useHtmlStyle || undefined,
+        },
+      },
     );
   }
 
@@ -104,6 +115,7 @@ export class FqNovelClient {
     bookId: string,
     chapterIds: string[],
     includeRawContent: boolean,
+    useHtmlStyle = false,
   ): Promise<BatchChaptersResponse> {
     return this.request<BatchChaptersResponse>("/chapters/batch", {
       method: "POST",
@@ -111,6 +123,7 @@ export class FqNovelClient {
         bookId,
         chapterIds,
         includeRawContent,
+        useHtmlStyle,
       },
     });
   }

@@ -58,7 +58,8 @@ public class FQBatchChapterService {
             );
         }
 
-        boolean includeRawContent = Boolean.TRUE.equals(request.getIncludeRawContent());
+        boolean useHtmlStyle = Boolean.TRUE.equals(request.getUseHtmlStyle());
+        boolean includeRawContent = Boolean.TRUE.equals(request.getIncludeRawContent()) || useHtmlStyle;
         FQDirectoryRequest directoryRequest = new FQDirectoryRequest();
         directoryRequest.setBookId(bookId);
         directoryRequest.setMinimalResponse(false);
@@ -75,7 +76,7 @@ public class FQBatchChapterService {
                 ChapterCatalog catalog = ChapterCatalog.from(directoryResponse.data());
                 String joinedIds = String.join(",", chapterIds);
                 return fqNovelService.batchFull(joinedIds, bookId, true)
-                    .thenApply(batchResponse -> mapBatchResponse(bookId, chapterIds, includeRawContent, catalog, batchResponse));
+                    .thenApply(batchResponse -> mapBatchResponse(bookId, chapterIds, includeRawContent, useHtmlStyle, catalog, batchResponse));
             })
             .exceptionally(error -> handleFailure(bookId, error));
     }
@@ -84,6 +85,7 @@ public class FQBatchChapterService {
         String bookId,
         List<String> chapterIds,
         boolean includeRawContent,
+        boolean useHtmlStyle,
         ChapterCatalog catalog,
         FQNovelResponse<FqIBatchFullResponse> batchResponse
     ) {
@@ -113,7 +115,7 @@ public class FQBatchChapterService {
                     includeRawContent
                 );
                 catalog.enrich(chapterInfo, chapterId);
-                chapters.add(chapterInfo);
+                chapters.add(chapterInfo.copyForResponse(includeRawContent, useHtmlStyle));
             } catch (Exception e) {
                 throw new CompletionException(
                     new IllegalStateException("章节解析失败: " + chapterId + ", " + Texts.defaultIfBlank(e.getMessage(), e.toString()), e)

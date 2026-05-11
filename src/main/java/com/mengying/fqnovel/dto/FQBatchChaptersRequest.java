@@ -10,6 +10,7 @@ public class FQBatchChaptersRequest {
     private String bookId;
     private List<String> chapterIds;
     private Boolean includeRawContent = false;
+    private Boolean useHtmlStyle = false;
 
     public String getBookId() {
         return bookId;
@@ -33,5 +34,13 @@ public class FQBatchChaptersRequest {
 
     public void setIncludeRawContent(Boolean includeRawContent) {
         this.includeRawContent = includeRawContent;
+    }
+
+    public Boolean getUseHtmlStyle() {
+        return useHtmlStyle;
+    }
+
+    public void setUseHtmlStyle(Boolean useHtmlStyle) {
+        this.useHtmlStyle = useHtmlStyle;
     }
 }

@@ -15,6 +15,10 @@ public class FQNovelRequest {
      */
     private String chapterId;
 
+    private Boolean includeRawContent = false;
+
+    private Boolean useHtmlStyle = false;
+
     public String getBookId() {
         return bookId;
     }
@@ -29,6 +33,22 @@ public class FQNovelRequest {
 
     public void setChapterId(String chapterId) {
         this.chapterId = chapterId;
+    }
+
+    public Boolean getIncludeRawContent() {
+        return includeRawContent;
+    }
+
+    public void setIncludeRawContent(Boolean includeRawContent) {
+        this.includeRawContent = includeRawContent;
+    }
+
+    public Boolean getUseHtmlStyle() {
+        return useHtmlStyle;
+    }
+
+    public void setUseHtmlStyle(Boolean useHtmlStyle) {
+        this.useHtmlStyle = useHtmlStyle;
     }
 }
 

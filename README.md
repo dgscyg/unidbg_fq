@@ -18,6 +18,29 @@ mvn -DskipTests package
 ```bash
 java -jar target/fqnovel.jar
 ```
+
+## TypeScript MCP 子项目
+
+仓库内包含独立的 MCP 服务子项目：`fqnovel-mcp-ts/`
+
+它复用当前 Java HTTP 服务，提供：
+
+- 搜索 / 目录 / 详情 / 单章
+- 批量下载
+- EPUB 导出
+- `useHtmlStyle=true` 的原始 HTML 样式正文与 EPUB 导出
+
+快速开始：
+
+```bash
+cd fqnovel-mcp-ts
+npm install
+npm run build
+npm start
+```
+
+详细参数、工具说明和 HTML EPUB 用法见：`fqnovel-mcp-ts/README.md`
+
 ## docker
 本地缓存版
 ```bash

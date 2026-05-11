@@ -9,7 +9,9 @@
 node_modules/
 dist/
 *.tsbuildinfo
+**/.tmp-*
 fqnovel-mcp-ts/manual-output/
+fqnovel-mcp-ts/test-output/
 fqnovel-mcp-ts/*.log
 target/
 trace_output/
@@ -18,3 +20,12 @@ read_source/
 Dockerfile.bak
 /utils/
 logs/
+META-INF/
+
+!.cursor/
+.cursor/*
+!.cursor/skills/
+.cursor/skills/*
+!.cursor/skills/fqnovel-html-epub/
+.cursor/skills/fqnovel-html-epub/*
+!.cursor/skills/fqnovel-html-epub/SKILL.md

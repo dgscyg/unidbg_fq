@@ -109,22 +109,32 @@ registerTool(
 
 registerTool(
   "fqnovel_chapter",
-  "获取单章正文，封装上游 GET /chapter/{bookId}/{chapterId} 接口。",
+  "获取单章正文，封装上游 GET /chapter/{bookId}/{chapterId} 接口，支持切换 txt 纯文本或原始 HTML 样式。",
   z.object({
     bookId: numericIdSchema("bookId"),
     chapterId: numericIdSchema("chapterId"),
     includeRawContent: z.boolean().default(false),
+    useHtmlStyle: z.boolean().default(false),
   }),
   async (args) => {
-    const response = await client.getChapter(args.bookId, args.chapterId);
+    const response = await client.getChapter(
+      args.bookId,
+      args.chapterId,
+      args.includeRawContent,
+      args.useHtmlStyle,
+    );
+    const showRawContent = args.includeRawContent || args.useHtmlStyle;
+    const textBody = args.useHtmlStyle
+      ? response.rawContent?.trim() || response.txtContent?.trim() || ""
+      : response.txtContent?.trim() || response.rawContent?.trim() || "";
     const payload = {
       request: args,
       response: {
         ...response,
-        rawContent: args.includeRawContent ? response.rawContent : undefined,
+        contentStyle: args.useHtmlStyle ? "html" : "txt",
+        rawContent: showRawContent ? response.rawContent : undefined,
       },
     };
-    const textBody = response.txtContent?.trim() || response.rawContent?.trim() || "";
     const title = response.title?.trim() || args.chapterId;
     const text = [`第${response.chapterIndex ?? "?"}章 ${title}`, "", textBody].join("\n");
 
@@ -134,13 +144,14 @@ registerTool(
 
 registerTool(
   "fqnovel_download",
-  "批量下载章节。只走上游批量章节接口，不逐章抓取，降低风控概率。可输出 txt/json。",
+  "批量下载章节。只走上游批量章节接口，不逐章抓取，降低风控概率。支持切换 txt 纯文本或原始 HTML 样式，可输出 txt/json。",
   z.object({
     bookId: numericIdSchema("bookId"),
     startChapter: z.number().int().min(1).optional(),
     endChapter: z.number().int().min(1).optional(),
     concurrency: z.number().int().min(1).max(20).optional(),
     includeRawContent: z.boolean().default(false),
+    useHtmlStyle: z.boolean().default(false),
     aggregateText: z.boolean().default(true),
     outputPath: z.string().trim().min(1).optional(),
     outputFormat: z.enum(["txt", "json"]).optional(),
@@ -154,7 +165,7 @@ registerTool(
 
     if (download.output) {
       return createTextResult(
-        `批量下载完成：${download.book.bookName ?? download.book.bookId}\n章节范围：${download.chapterRange.start}-${download.chapterRange.end}\n批量请求数：${download.batchInfo.requestCount}\n输出文件：${download.output.path}`,
+        `批量下载完成：${download.book.bookName ?? download.book.bookId}\n章节范围：${download.chapterRange.start}-${download.chapterRange.end}\n正文样式：${download.contentStyle}\n批量请求数：${download.batchInfo.requestCount}\n输出文件：${download.output.path}`,
         ensureStructuredContent(payload),
       );
     }
@@ -169,12 +180,13 @@ registerTool(
 
 registerTool(
   "fqnovel_epub",
-  "整本小说 EPUB 下载。内部按 30 章一批走批量章节接口，输出打包好的 epub 文件。",
+  "整本小说 EPUB 下载。内部按批量章节接口分批拉取正文，支持切换 txt 纯文本或原始 HTML 样式并输出 epub 文件。",
   z.object({
     bookId: numericIdSchema("bookId"),
     startChapter: z.number().int().min(1).optional(),
     endChapter: z.number().int().min(1).optional(),
     concurrency: z.number().int().min(1).max(20).optional(),
+    useHtmlStyle: z.boolean().default(false),
     outputPath: z.string().trim().min(1).optional(),
   }),
   async (args) => {
@@ -185,7 +197,7 @@ registerTool(
     };
 
     return createTextResult(
-      `EPUB 已生成：${epub.book.bookName ?? epub.book.bookId}\n章节范围：${epub.chapterRange.start}-${epub.chapterRange.end}\n批量请求数：${epub.batchInfo.requestCount}\n封面嵌入：${epub.coverEmbedded ? "yes" : "no"}\n输出文件：${epub.output.path}`,
+      `EPUB 已生成：${epub.book.bookName ?? epub.book.bookId}\n章节范围：${epub.chapterRange.start}-${epub.chapterRange.end}\n正文样式：${epub.contentStyle}\n批量请求数：${epub.batchInfo.requestCount}\n封面嵌入：${epub.coverEmbedded ? "yes" : "no"}\n输出文件：${epub.output.path}`,
       ensureStructuredContent(payload),
     );
   },

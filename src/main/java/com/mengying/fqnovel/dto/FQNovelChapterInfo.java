@@ -167,6 +167,27 @@ public class FQNovelChapterInfo {
         this.txtContent = txtContent;
     }
 
+    public boolean hasRawContent() {
+        return Texts.hasText(rawContent);
+    }
+
+    public FQNovelChapterInfo copyForResponse(boolean includeRawContent, boolean useHtmlStyle) {
+        FQNovelChapterInfo copy = new FQNovelChapterInfo();
+        copy.setChapterId(chapterId);
+        copy.setBookId(bookId);
+        copy.setAuthorName(authorName);
+        copy.setTitle(title);
+        copy.setRawContent(includeRawContent ? rawContent : null);
+        copy.setChapterIndex(chapterIndex);
+        copy.setWordCount(wordCount);
+        copy.setUpdateTime(updateTime);
+        copy.setPrevChapterId(prevChapterId);
+        copy.setNextChapterId(nextChapterId);
+        copy.setIsFree(isFree);
+        copy.setTxtContent(useHtmlStyle && Texts.hasText(rawContent) ? rawContent : txtContent);
+        return copy;
+    }
+
     /**
      * 缓存写入前的统一校验：
      * 1. 标准化并校验 bookId/chapterId；

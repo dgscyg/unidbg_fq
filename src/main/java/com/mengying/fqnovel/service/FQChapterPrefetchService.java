@@ -118,15 +118,18 @@ public class FQChapterPrefetchService {
             return errorFuture("章节ID不能为空");
         }
 
+        final boolean includeRawContent = shouldIncludeRawContent(request);
+        final boolean useHtmlStyle = request != null && Boolean.TRUE.equals(request.getUseHtmlStyle());
+
         FQNovelChapterInfo cached = getCachedChapter(bookId, chapterId);
-        if (cached != null) {
-            return CompletableFuture.completedFuture(FQNovelResponse.success(cached));
+        if (canServeChapterResponse(cached, includeRawContent)) {
+            return CompletableFuture.completedFuture(chapterSuccessResponse(cached, includeRawContent, useHtmlStyle));
         }
 
         // 主缓存：PostgreSQL（命中后回填本地 Caffeine）
         FQNovelChapterInfo persisted = getPersistedChapter(bookId, chapterId);
-        if (persisted != null) {
-            return CompletableFuture.completedFuture(FQNovelResponse.success(persisted));
+        if (canServeChapterResponse(persisted, includeRawContent)) {
+            return CompletableFuture.completedFuture(chapterSuccessResponse(persisted, includeRawContent, useHtmlStyle));
         }
 
         String cachedFailure = getCachedChapterFailure(bookId, chapterId);
@@ -144,8 +147,8 @@ public class FQChapterPrefetchService {
             .exceptionally(ex -> null) // 预取失败不影响单章兜底
             .thenCompose(ignored -> {
                 FQNovelChapterInfo afterPrefetch = getCachedChapter(bookId, chapterId);
-                if (afterPrefetch != null) {
-                    return CompletableFuture.completedFuture(FQNovelResponse.success(afterPrefetch));
+                if (canServeChapterResponse(afterPrefetch, includeRawContent)) {
+                    return CompletableFuture.completedFuture(chapterSuccessResponse(afterPrefetch, includeRawContent, useHtmlStyle));
                 }
 
                 // 兜底：仍未命中则只取单章
@@ -168,9 +171,14 @@ public class FQChapterPrefetchService {
                         );
                     }
                     try {
-                        FQNovelChapterInfo info = chapterContentBuilder.buildChapterInfo(bookId, chapterId, itemContent);
+                        FQNovelChapterInfo info = chapterContentBuilder.buildChapterInfo(
+                            bookId,
+                            chapterId,
+                            itemContent,
+                            includeRawContent
+                        );
                         cacheChapter(bookId, chapterId, info);
-                        return FQNovelResponse.success(info);
+                        return chapterSuccessResponse(info, includeRawContent, useHtmlStyle);
                     } catch (Exception e) {
                         throw new RuntimeException(e);
                     }
@@ -257,6 +265,23 @@ public class FQChapterPrefetchService {
 
     private static <T> CompletableFuture<FQNovelResponse<T>> errorFuture(String message) {
         return CompletableFuture.completedFuture(FQNovelResponse.error(message));
+    }
+
+    private static boolean shouldIncludeRawContent(FQNovelRequest request) {
+        return request != null
+            && (Boolean.TRUE.equals(request.getIncludeRawContent()) || Boolean.TRUE.equals(request.getUseHtmlStyle()));
+    }
+
+    private static boolean canServeChapterResponse(FQNovelChapterInfo chapterInfo, boolean includeRawContent) {
+        return chapterInfo != null && (!includeRawContent || chapterInfo.hasRawContent());
+    }
+
+    private static FQNovelResponse<FQNovelChapterInfo> chapterSuccessResponse(
+        FQNovelChapterInfo chapterInfo,
+        boolean includeRawContent,
+        boolean useHtmlStyle
+    ) {
+        return FQNovelResponse.success(chapterInfo.copyForResponse(includeRawContent, useHtmlStyle));
     }
 
     private int prefetchBatchSize() {

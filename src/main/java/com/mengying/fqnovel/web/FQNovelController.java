@@ -17,6 +17,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.concurrent.CompletableFuture;
@@ -66,20 +67,32 @@ public class FQNovelController {
      * 
      * @param bookId 书籍ID
      * @param chapterId 章节ID
+     * @param includeRawContent 是否额外返回原始 HTML 正文
+     * @param useHtmlStyle 是否返回原始 HTML 样式正文
      * @return 章节内容信息
      */
     @GetMapping("/chapter/{bookId:\\d+}/{chapterId:\\d+}")
     public CompletableFuture<FQNovelResponse<FQNovelChapterInfo>> getChapterContent(
             @PathVariable String bookId,
-            @PathVariable String chapterId) {
+            @PathVariable String chapterId,
+            @RequestParam(defaultValue = "false") boolean includeRawContent,
+            @RequestParam(defaultValue = "false") boolean useHtmlStyle) {
 
         if (log.isDebugEnabled()) {
-            log.debug("获取章节内容 - bookId: {}, chapterId: {}", bookId, chapterId);
+            log.debug(
+                "获取章节内容 - bookId: {}, chapterId: {}, includeRawContent: {}, useHtmlStyle: {}",
+                bookId,
+                chapterId,
+                includeRawContent,
+                useHtmlStyle
+            );
         }
 
         FQNovelRequest request = new FQNovelRequest();
         request.setBookId(bookId);
         request.setChapterId(chapterId);
+        request.setIncludeRawContent(includeRawContent || useHtmlStyle);
+        request.setUseHtmlStyle(useHtmlStyle);
         return fqChapterPrefetchService.getChapterContent(request);
     }
 
@@ -91,9 +104,10 @@ public class FQNovelController {
             @RequestBody FQBatchChaptersRequest request) {
 
         if (log.isDebugEnabled()) {
-            log.debug("批量获取章节内容 - bookId: {}, chapterIds: {}",
+            log.debug("批量获取章节内容 - bookId: {}, chapterIds: {}, useHtmlStyle: {}",
                 request == null ? null : request.getBookId(),
-                request == null ? null : request.getChapterIds());
+                request == null ? null : request.getChapterIds(),
+                request == null ? null : request.getUseHtmlStyle());
         }
 
         return fqBatchChapterService.getBatchChapters(request);

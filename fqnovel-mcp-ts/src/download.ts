@@ -10,6 +10,7 @@ import type {
   BatchRequestInfo,
   BookInfo,
   ChapterInfo,
+  ContentStyle,
   DownloadChapter,
   DownloadOptions,
   DownloadOutput,
@@ -132,7 +133,9 @@ function isRiskControlBatchError(error: unknown): boolean {
   if (!(error instanceof FqNovelApiError)) {
     return false;
   }
-  return /ILLEGAL_ACCESS|风控|空响应|章节内容为空\/过短/i.test(error.message);
+  return /ILLEGAL_ACCESS|风控|空响应|章节内容为空\/过短|fetch failed|socket hang up|ECONNRESET|ECONNREFUSED|network error/i.test(
+    error.message,
+  );
 }
 
 function buildAggregateText(book: Required<Pick<BookInfo, "bookId">> & BookInfo, chapters: DownloadChapter[]): string {
@@ -235,8 +238,28 @@ async function prepareDownload(
   };
 }
 
-function toDownloadChapter(detail: ChapterInfo, fallback: TocChapter, includeRawContent: boolean): DownloadChapter {
-  const content = detail.txtContent?.trim() || detail.rawContent?.trim();
+function resolveContentStyle(useHtmlStyle?: boolean): ContentStyle {
+  return useHtmlStyle ? "html" : "txt";
+}
+
+function shouldIncludeRawContent(includeRawContent: boolean | undefined, contentStyle: ContentStyle): boolean {
+  return Boolean(includeRawContent) || contentStyle === "html";
+}
+
+function resolveChapterContent(detail: ChapterInfo, contentStyle: ContentStyle): string | undefined {
+  if (contentStyle === "html") {
+    return detail.rawContent?.trim() || detail.txtContent?.trim();
+  }
+  return detail.txtContent?.trim() || detail.rawContent?.trim();
+}
+
+function toDownloadChapter(
+  detail: ChapterInfo,
+  fallback: TocChapter,
+  contentStyle: ContentStyle,
+  includeRawContent: boolean,
+): DownloadChapter {
+  const content = resolveChapterContent(detail, contentStyle);
   if (!content) {
     throw new FqNovelApiError(`章节 ${fallback.chapterId} 正文为空`);
   }
@@ -246,6 +269,7 @@ function toDownloadChapter(detail: ChapterInfo, fallback: TocChapter, includeRaw
     chapterId: detail.chapterId ?? fallback.chapterId,
     title: detail.title?.trim() || fallback.title,
     content,
+    contentStyle,
     wordCount: detail.wordCount,
     nextChapterId: detail.nextChapterId,
     prevChapterId: detail.prevChapterId,
@@ -263,6 +287,7 @@ async function fetchSingleBatchWithRetry(
   client: FqNovelClient,
   bookId: string,
   batch: TocChapter[],
+  contentStyle: ContentStyle,
   includeRawContent: boolean,
   options: BatchFetchOptions,
 ): Promise<DownloadChapter[]> {
@@ -274,6 +299,7 @@ async function fetchSingleBatchWithRetry(
         bookId,
         batch.map((chapter) => chapter.chapterId),
         includeRawContent,
+        contentStyle === "html",
       );
 
       const missing = response.missingChapterIds ?? [];
@@ -287,7 +313,7 @@ async function fetchSingleBatchWithRetry(
         if (!detail) {
           throw new FqNovelApiError(`批量章节未返回 ${chapter.chapterId}`);
         }
-        return toDownloadChapter(detail, chapter, includeRawContent);
+        return toDownloadChapter(detail, chapter, contentStyle, includeRawContent);
       });
     } catch (error) {
       lastError = error;
@@ -301,10 +327,79 @@ async function fetchSingleBatchWithRetry(
   throw lastError instanceof Error ? lastError : new Error("批量章节请求失败");
 }
 
+async function fetchBatchAdaptive(
+  client: FqNovelClient,
+  bookId: string,
+  batch: TocChapter[],
+  contentStyle: ContentStyle,
+  includeRawContent: boolean,
+  options: BatchFetchOptions,
+  showProgress: boolean,
+): Promise<DownloadChapter[]> {
+  try {
+    return await fetchSingleBatchWithRetry(client, bookId, batch, contentStyle, includeRawContent, options);
+  } catch (error) {
+    if (batch.length <= 1) {
+      const chapter = batch[0];
+      if (!chapter) {
+        throw error;
+      }
+      if (showProgress) {
+        console.error(
+          `[fqnovel] fallback single chapter ${chapter.index} via /chapter reason=${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+      const detail = await client.getChapter(
+        bookId,
+        chapter.chapterId,
+        includeRawContent,
+        contentStyle === "html",
+      );
+      return [toDownloadChapter(detail, chapter, contentStyle, includeRawContent)];
+    }
+
+    const middle = Math.ceil(batch.length / 2);
+    const left = batch.slice(0, middle);
+    const right = batch.slice(middle);
+
+    if (showProgress) {
+      const startIndex = batch[0]?.index ?? 0;
+      const endIndex = batch[batch.length - 1]?.index ?? startIndex;
+      console.error(
+        `[fqnovel] split batch ${startIndex}-${endIndex} size=${batch.length} reason=${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+
+    const leftResult = await fetchBatchAdaptive(
+      client,
+      bookId,
+      left,
+      contentStyle,
+      includeRawContent,
+      options,
+      showProgress,
+    );
+    if (right.length === 0) {
+      return leftResult;
+    }
+    const rightResult = await fetchBatchAdaptive(
+      client,
+      bookId,
+      right,
+      contentStyle,
+      includeRawContent,
+      options,
+      showProgress,
+    );
+    return [...leftResult, ...rightResult];
+  }
+}
+
 async function fetchChaptersViaBatch(
   client: FqNovelClient,
   bookId: string,
   selected: TocChapter[],
+  contentStyle: ContentStyle,
   includeRawContent: boolean,
   concurrency: number,
   options: BatchFetchOptions,
@@ -312,12 +407,33 @@ async function fetchChaptersViaBatch(
   const batchSize = clamp(options.batchSize, 1, MAX_BATCH_CHAPTERS_PER_REQUEST);
   const batches = chunkArray(selected, batchSize);
   const normalizedConcurrency = clamp(concurrency, 1, 20);
+  const totalBatches = batches.length;
+  const showProgress = process.env.FQNOVEL_PROGRESS === "1";
 
   const batchResults = await mapWithConcurrency(batches, normalizedConcurrency, async (batch, index) => {
+    if (showProgress) {
+      const startIndex = batch[0]?.index ?? index * batchSize + 1;
+      const endIndex = batch[batch.length - 1]?.index ?? startIndex;
+      console.error(
+        `[fqnovel] batch ${index + 1}/${totalBatches} start chapters ${startIndex}-${endIndex} style=${contentStyle}`,
+      );
+    }
     if (normalizedConcurrency === 1 && index > 0) {
       await sleep(options.delayMs);
     }
-    return fetchSingleBatchWithRetry(client, bookId, batch, includeRawContent, options);
+    const result = await fetchBatchAdaptive(
+      client,
+      bookId,
+      batch,
+      contentStyle,
+      includeRawContent,
+      options,
+      showProgress,
+    );
+    if (showProgress) {
+      console.error(`[fqnovel] batch ${index + 1}/${totalBatches} done chapters=${result.length}`);
+    }
+    return result;
   });
 
   return {
@@ -347,6 +463,32 @@ function renderParagraphs(text: string): string {
     .join("\n        ");
 }
 
+function normalizeHtmlFragment(rawHtml: string): string {
+  return rawHtml
+    .trim()
+    .replace(/<\?xml[\s\S]*?\?>/gi, "")
+    .replace(/<!DOCTYPE[\s\S]*?>/gi, "")
+    .replace(/<\/?(?:html|head|body)[^>]*>/gi, "")
+    .replace(/<blk\b[^>]*>/gi, '<p class="blk">')
+    .replace(/<\/blk>/gi, "</p>")
+    .trim();
+}
+
+function renderChapterBody(book: Required<Pick<BookInfo, "bookId">> & BookInfo, chapter: DownloadChapter): string {
+  if (chapter.contentStyle === "html") {
+    return [
+      `<h2 class="book-title">${escapeXml(book.bookName || book.bookId)}</h2>`,
+      normalizeHtmlFragment(chapter.content),
+    ].join("\n    ");
+  }
+
+  return [
+    `<h1>${escapeXml(chapter.title)}</h1>`,
+    `<h2>${escapeXml(book.bookName || book.bookId)}</h2>`,
+    renderParagraphs(chapter.content),
+  ].join("\n    ");
+}
+
 function buildChapterXhtml(book: Required<Pick<BookInfo, "bookId">> & BookInfo, chapter: DownloadChapter): string {
   return `<?xml version="1.0" encoding="utf-8"?>
 <html xmlns="http://www.w3.org/1999/xhtml" xml:lang="zh-CN">
@@ -355,9 +497,7 @@ function buildChapterXhtml(book: Required<Pick<BookInfo, "bookId">> & BookInfo, 
     <link rel="stylesheet" type="text/css" href="../Styles/book.css" />
   </head>
   <body>
-    <h1>${escapeXml(chapter.title)}</h1>
-    <h2>${escapeXml(book.bookName || book.bookId)}</h2>
-    ${renderParagraphs(chapter.content)}
+    ${renderChapterBody(book, chapter)}
   </body>
 </html>`;
 }
@@ -382,8 +522,8 @@ function buildCoverXhtml(book: Required<Pick<BookInfo, "bookId">> & BookInfo, co
 function buildStyles(): string {
   return `body { font-family: serif; line-height: 1.6; margin: 5%; }
 h1 { font-size: 1.5em; margin-bottom: 0.8em; }
-h2 { font-size: 1em; color: #666; margin-top: 0; margin-bottom: 1.5em; }
-p { text-indent: 2em; margin: 0.6em 0; }
+h2, .book-title { font-size: 1em; color: #666; margin-top: 0; margin-bottom: 1.5em; }
+p, .blk { text-indent: 2em; margin: 0.6em 0; display: block; }
 .cover-page { text-align: center; }
 .cover-image { max-width: 100%; max-height: 90vh; object-fit: contain; }
 .cover-author { color: #666; }`;
@@ -565,11 +705,14 @@ export async function downloadBook(
   options: DownloadOptions,
 ): Promise<DownloadResult> {
   const prepared = await prepareDownload(client, options.bookId, options.startChapter, options.endChapter);
+  const contentStyle = resolveContentStyle(options.useHtmlStyle);
+  const includeRawContent = shouldIncludeRawContent(options.includeRawContent, contentStyle);
   const { chapters, batchInfo } = await fetchChaptersViaBatch(
     client,
     options.bookId,
     prepared.selected,
-    Boolean(options.includeRawContent),
+    contentStyle,
+    includeRawContent,
     options.concurrency ?? config.downloadConcurrency,
     {
       batchSize: MAX_BATCH_CHAPTERS_PER_REQUEST,
@@ -584,6 +727,7 @@ export async function downloadBook(
   const payload: DownloadResult = {
     book: prepared.book,
     chapterRange: prepared.chapterRange,
+    contentStyle,
     batchInfo,
     chapters,
     aggregateText,
@@ -603,11 +747,13 @@ export async function buildEpub(
   options: EpubOptions,
 ): Promise<EpubResult> {
   const prepared = await prepareDownload(client, options.bookId, options.startChapter, options.endChapter);
+  const contentStyle = resolveContentStyle(options.useHtmlStyle);
   const { chapters, batchInfo } = await fetchChaptersViaBatch(
     client,
     options.bookId,
     prepared.selected,
-    false,
+    contentStyle,
+    contentStyle === "html",
     options.concurrency ?? config.downloadConcurrency,
     {
       batchSize: EPUB_BATCH_SIZE,
@@ -659,6 +805,7 @@ export async function buildEpub(
   return {
     book: prepared.book,
     chapterRange: prepared.chapterRange,
+    contentStyle,
     batchInfo,
     output,
     coverUrl: prepared.book.coverUrl,
