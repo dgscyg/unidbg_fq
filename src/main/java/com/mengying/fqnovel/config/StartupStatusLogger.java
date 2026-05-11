@@ -15,18 +15,15 @@ public class StartupStatusLogger {
 
     private static final Logger log = LoggerFactory.getLogger(StartupStatusLogger.class);
 
-    private final FQApiProperties fqApiProperties;
     private final FQApiRuntimeProfileManager runtimeProfileManager;
     private final FQDeviceRotationService deviceRotationService;
     private final FQRegisterKeyService registerKeyService;
 
     public StartupStatusLogger(
-        FQApiProperties fqApiProperties,
         FQApiRuntimeProfileManager runtimeProfileManager,
         FQDeviceRotationService deviceRotationService,
         FQRegisterKeyService registerKeyService
     ) {
-        this.fqApiProperties = fqApiProperties;
         this.runtimeProfileManager = runtimeProfileManager;
         this.deviceRotationService = deviceRotationService;
         this.registerKeyService = registerKeyService;
@@ -36,9 +33,15 @@ public class StartupStatusLogger {
     public void onReady() {
         String poolName = deviceRotationService.getCurrentProfileName();
         String deviceId = currentRuntimeDeviceId();
-        int poolSize = configuredDevicePoolSize();
+        int totalProfiles = deviceRotationService.totalProfileCount();
+        int availableProfiles = deviceRotationService.availableProfileCount();
 
-        log.info("设备配置：池大小={}, 当前={}, ID={}", poolSize, poolName, deviceId);
+        if (deviceRotationService.hasActiveRuntimeProfile()) {
+            log.info("设备配置：总数={}, 可用={}, 当前={}, ID={}", totalProfiles, availableProfiles, poolName, deviceId);
+        } else {
+            log.warn("设备配置：总数={}, 可用={}, 当前无活动设备，服务以降级态启动", totalProfiles, availableProfiles);
+            return;
+        }
 
         // 预热：启动时预先获取 registerkey
         try {
@@ -61,7 +64,4 @@ public class StartupStatusLogger {
         return device.getDeviceId();
     }
 
-    private int configuredDevicePoolSize() {
-        return fqApiProperties.getDevicePool() == null ? 0 : fqApiProperties.getDevicePool().size();
-    }
 }

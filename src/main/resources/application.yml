@@ -62,67 +62,11 @@ fq:
       self-heal-enabled: true
       self-heal-cooldown-ms: 180000
   api:
-    base-url: "https://api5-normal-sinfonlineb.fqnovel.com"
-    device-pool-size: 3
-    device-pool-shuffle-on-startup: true
-    device-pool-probe-on-startup: true
-    device-pool-probe-max-attempts: 3
-    device-rotate-cooldown-ms: 60000
-    device-pool:
-      - name: dev01
-        user-agent: "com.dragon.read.oversea.gp/68132 (Linux; U; Android 13; zh_CN; Sirius; Build/V417IR;tt-ok/3.12.13.4-tiktok)"
-        cookie: "store-region=cn-zj; store-region-src=did; install_id=573270579220059"
-        device:
-          aid: '1967'
-          cdid: 9daf93bf-4dcf-417e-8795-20284ad26a1f
-          device-brand: Xiaomi
-          device-id: '1778337441136410'
-          device-type: Sirius
-          dpi: '440'
-          host-abi: arm64-v8a
-          install-id: '573270579220059'
-          resolution: "2244*1080"
-          rom-version: "V417IR+release-keys"
-          update-version-code: '68132'
-          version-code: '68132'
-          version-name: "6.8.1.32"
-          os-version: '13'
-          os-api: '33'
-      - name: dev02
-        user-agent: "com.dragon.read.oversea.gp/68132 (Linux; U; Android 13; zh_CN; WLZ-AN00; Build/V433IR;tt-ok/3.12.13.4-tiktok)"
-        cookie: "store-region=cn-zj; store-region-src=did; install_id=670078579016233"
-        device:
-          aid: '1967'
-          cdid: 5566b484-82f9-4cef-880d-60ca354e6a99
-          device-brand: HUAWEI
-          device-id: '670078578733609'
-          device-type: WLZ-AN00
-          dpi: '480'
-          host-abi: arm64-v8a
-          install-id: '670078579016233'
-          resolution: "1920*1080"
-          rom-version: "V433IR+release-keys"
-          update-version-code: '68132'
-          version-code: '68132'
-          version-name: "6.8.1.32"
-          os-version: '13'
-          os-api: '32'
-      - name: dev03
-        user-agent: "com.dragon.read.oversea.gp/68132 (Linux; U; Android 14; zh_CN; SM-S9110; Build/UP1A.231005.007;tt-ok/3.12.13.4-tiktok)"
-        cookie: "store-region=cn-zj; store-region-src=did; install_id=824916735312058"
-        device:
-          aid: '1967'
-          cdid: a3e71c92-5f8a-4d3b-b6e1-48c0d7f3a215
-          device-brand: samsung
-          device-id: '824916735028471'
-          device-type: SM-S9110
-          dpi: '480'
-          host-abi: arm64-v8a
-          install-id: '824916735312058'
-          resolution: "2340*1080"
-          rom-version: "UP1A.231005.007+release-keys"
-          update-version-code: '68132'
-          version-code: '68132'
-          version-name: "6.8.1.32"
-          os-version: '14'
-          os-api: '34'
+    base-url: ${FQ_API_BASE_URL:https://api5-normal-sinfonlineb.fqnovel.com}
+    device-pool-size: ${DEVICE_POOL_SIZE:8}
+    device-pool-shuffle-on-startup: ${DEVICE_POOL_SHUFFLE_ON_STARTUP:true}
+    device-pool-probe-on-startup: ${DEVICE_POOL_PROBE_ON_STARTUP:true}
+    device-pool-probe-max-attempts: ${DEVICE_POOL_PROBE_MAX_ATTEMPTS:3}
+    device-rotate-cooldown-ms: ${DEVICE_ROTATE_COOLDOWN_MS:60000}
+    device-pool-allow-empty: ${DEVICE_POOL_ALLOW_EMPTY:true}
+    device-pool-risk-cooldown-ms: ${DEVICE_POOL_RISK_COOLDOWN_MS:43200000}

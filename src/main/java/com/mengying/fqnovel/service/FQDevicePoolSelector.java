@@ -2,6 +2,7 @@ package com.mengying.fqnovel.service;
 
 import com.mengying.fqnovel.config.FQApiProperties;
 import com.mengying.fqnovel.utils.Texts;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -13,31 +14,46 @@ import java.util.function.Function;
 
 /**
  * 设备池选择器。
- * 负责设备池裁剪、启动基线选择和运行时轮换候选选择。
+ * 负责 PostgreSQL / 配置文件设备池裁剪、启动基线选择和运行时轮换候选选择。
  */
 @Service
 public class FQDevicePoolSelector {
 
     private final FQApiProperties fqApiProperties;
+    private final ObjectProvider<PgDevicePoolService> pgDevicePoolServiceProvider;
     private final AtomicInteger poolIndex = new AtomicInteger(0);
     private volatile String currentProfileName = "";
 
-    public FQDevicePoolSelector(FQApiProperties fqApiProperties) {
+    public FQDevicePoolSelector(
+        FQApiProperties fqApiProperties,
+        ObjectProvider<PgDevicePoolService> pgDevicePoolServiceProvider
+    ) {
         this.fqApiProperties = fqApiProperties;
+        this.pgDevicePoolServiceProvider = pgDevicePoolServiceProvider;
     }
 
     public List<FQApiProperties.DeviceProfile> effectivePool() {
-        List<FQApiProperties.DeviceProfile> pool = fqApiProperties.getDevicePool();
-        if (pool == null || pool.isEmpty()) {
-            return List.of();
+        PgDevicePoolService pgDevicePoolService = pgDevicePoolServiceProvider.getIfAvailable();
+        if (pgDevicePoolService != null) {
+            return pgDevicePoolService.listAvailableProfiles(Math.max(1, fqApiProperties.getDevicePoolSize()));
         }
+        return effectiveConfiguredPool();
+    }
 
-        int limit = Math.max(1, fqApiProperties.getDevicePoolSize());
-        if (pool.size() > limit) {
-            pool = new ArrayList<>(pool.subList(0, limit));
-            fqApiProperties.setDevicePool(pool);
+    public int totalProfileCount() {
+        PgDevicePoolService pgDevicePoolService = pgDevicePoolServiceProvider.getIfAvailable();
+        if (pgDevicePoolService != null) {
+            return pgDevicePoolService.countAllDevices();
         }
-        return pool;
+        return effectiveConfiguredPool().size();
+    }
+
+    public int availableProfileCount() {
+        PgDevicePoolService pgDevicePoolService = pgDevicePoolServiceProvider.getIfAvailable();
+        if (pgDevicePoolService != null) {
+            return pgDevicePoolService.countAvailableDevices();
+        }
+        return effectiveConfiguredPool().size();
     }
 
     public int resolveStartupIndex(List<FQApiProperties.DeviceProfile> pool) {
@@ -82,6 +98,14 @@ public class FQDevicePoolSelector {
 
     public void markActiveProfile(FQApiProperties.DeviceProfile profile) {
         currentProfileName = Texts.nullToEmpty(profileName(profile));
+        PgDevicePoolService pgDevicePoolService = pgDevicePoolServiceProvider.getIfAvailable();
+        if (pgDevicePoolService != null) {
+            pgDevicePoolService.markSelected(profile);
+        }
+    }
+
+    public void clearActiveProfile() {
+        currentProfileName = "";
     }
 
     public void setNextRotationIndex(int selectedIndex, int poolSize) {
@@ -95,6 +119,19 @@ public class FQDevicePoolSelector {
     }
 
     public record RotationCandidate(FQApiProperties.DeviceProfile profile, int index) {
+    }
+
+    private List<FQApiProperties.DeviceProfile> effectiveConfiguredPool() {
+        List<FQApiProperties.DeviceProfile> pool = fqApiProperties.getDevicePool();
+        if (pool == null || pool.isEmpty()) {
+            return List.of();
+        }
+
+        int limit = Math.max(1, fqApiProperties.getDevicePoolSize());
+        if (pool.size() > limit) {
+            return new ArrayList<>(pool.subList(0, limit));
+        }
+        return new ArrayList<>(pool);
     }
 
     private int findByName(List<FQApiProperties.DeviceProfile> pool, String name) {

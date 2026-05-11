@@ -1,0 +1,51 @@
+services:
+  postgres:
+    image: postgres:17
+    container_name: ${COMPOSE_PROJECT_NAME:-fqnovel}-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      TZ: ${TZ:-Asia/Shanghai}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ${COMPOSE_PROJECT_NAME:-fqnovel}-app
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+      SERVER_PORT: ${SERVER_PORT:-9999}
+      SERVER_ADDRESS: 0.0.0.0
+      FQ_API_BASE_URL: ${FQ_API_BASE_URL:-https://api5-normal-sinfonlineb.fqnovel.com}
+      DEVICE_POOL_SIZE: ${DEVICE_POOL_SIZE:-8}
+      DEVICE_POOL_SHUFFLE_ON_STARTUP: ${DEVICE_POOL_SHUFFLE_ON_STARTUP:-true}
+      DEVICE_POOL_PROBE_ON_STARTUP: ${DEVICE_POOL_PROBE_ON_STARTUP:-true}
+      DEVICE_POOL_PROBE_MAX_ATTEMPTS: ${DEVICE_POOL_PROBE_MAX_ATTEMPTS:-3}
+      DEVICE_ROTATE_COOLDOWN_MS: ${DEVICE_ROTATE_COOLDOWN_MS:-60000}
+      DEVICE_POOL_ALLOW_EMPTY: ${DEVICE_POOL_ALLOW_EMPTY:-true}
+      DEVICE_POOL_RISK_COOLDOWN_MS: ${DEVICE_POOL_RISK_COOLDOWN_MS:-43200000}
+      DB_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      SPRING_CONFIG_ADDITIONAL_LOCATION: file:/app/config/
+    ports:
+      - "${SERVER_PORT:-9999}:9999"
+    volumes:
+      - ./docker/app:/app/config:ro
+
+volumes:
+  postgres-data:

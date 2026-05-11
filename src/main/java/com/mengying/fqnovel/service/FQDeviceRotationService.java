@@ -12,6 +12,7 @@ import com.mengying.fqnovel.utils.Texts;
 import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -35,6 +36,7 @@ public class FQDeviceRotationService {
     private final UpstreamSignedRequestService upstreamSignedRequestService;
     private final FQDevicePoolSelector devicePoolSelector;
     private final FQDeviceProfileApplier deviceProfileApplier;
+    private final ObjectProvider<PgDevicePoolService> pgDevicePoolServiceProvider;
 
     private final ReentrantLock lock = new ReentrantLock();
     private volatile long lastRotateAtMs = 0L;
@@ -47,7 +49,8 @@ public class FQDeviceRotationService {
         FQSearchRequestEnricher searchRequestEnricher,
         UpstreamSignedRequestService upstreamSignedRequestService,
         FQDevicePoolSelector devicePoolSelector,
-        FQDeviceProfileApplier deviceProfileApplier
+        FQDeviceProfileApplier deviceProfileApplier,
+        ObjectProvider<PgDevicePoolService> pgDevicePoolServiceProvider
     ) {
         this.fqApiProperties = fqApiProperties;
         this.runtimeProfileManager = runtimeProfileManager;
@@ -57,21 +60,39 @@ public class FQDeviceRotationService {
         this.upstreamSignedRequestService = upstreamSignedRequestService;
         this.devicePoolSelector = devicePoolSelector;
         this.deviceProfileApplier = deviceProfileApplier;
+        this.pgDevicePoolServiceProvider = pgDevicePoolServiceProvider;
     }
 
     public String getCurrentProfileName() {
         return devicePoolSelector.getCurrentProfileName();
     }
 
+    public int totalProfileCount() {
+        return devicePoolSelector.totalProfileCount();
+    }
+
+    public int availableProfileCount() {
+        return devicePoolSelector.availableProfileCount();
+    }
+
+    public boolean hasActiveRuntimeProfile() {
+        return runtimeProfileManager.hasRuntimeProfile();
+    }
+
     @PostConstruct
     public void initDevicePoolOnStartup() {
         List<FQApiProperties.DeviceProfile> pool = devicePoolSelector.effectivePool();
         if (pool.isEmpty()) {
+            String reason = totalProfileCount() > 0
+                ? "设备池存在记录，但当前没有可用设备"
+                : "设备池为空";
+            enterDegradedMode(reason);
             return;
         }
 
         int selectedIndex = devicePoolSelector.resolveStartupIndex(pool);
         if (selectedIndex < 0) {
+            enterDegradedMode("启动时未找到可用设备");
             return;
         }
 
@@ -101,6 +122,30 @@ public class FQDeviceRotationService {
      */
     public boolean forceRotate(String reason) {
         return rotateInternal(reason, true);
+    }
+
+    public boolean handleRiskFailure(String reason) {
+        return handleRiskFailure(reason, false);
+    }
+
+    public boolean handleRiskFailureForce(String reason) {
+        return handleRiskFailure(reason, true);
+    }
+
+    public void markCurrentDeviceSuccess() {
+        PgDevicePoolService pgDevicePoolService = pgDevicePoolServiceProvider.getIfAvailable();
+        if (pgDevicePoolService != null) {
+            pgDevicePoolService.markSuccess(runtimeProfileManager.getRuntimeProfile());
+        }
+    }
+
+    private boolean handleRiskFailure(String reason, boolean force) {
+        boolean marked = markCurrentDeviceRiskCooldown(reason);
+        boolean rotated = force ? forceRotate(reason) : rotateIfNeeded(reason);
+        if (!rotated && marked) {
+            enterDegradedMode("当前设备已进入风险冷却，且没有可切换设备");
+        }
+        return rotated;
     }
 
     private int selectStartupProfileWithProbe(List<FQApiProperties.DeviceProfile> pool, int selectedIndex) {
@@ -202,7 +247,7 @@ public class FQDeviceRotationService {
                 return false;
             }
 
-            if (!rotateFromConfiguredPool(reason)) {
+            if (!rotateFromAvailablePool(reason)) {
                 log.warn("检测到异常，但设备池中无可切换设备：原因={}", reason);
                 return false;
             }
@@ -215,7 +260,7 @@ public class FQDeviceRotationService {
         }
     }
 
-    private boolean rotateFromConfiguredPool(String reason) {
+    private boolean rotateFromAvailablePool(String reason) {
         FQDevicePoolSelector.RotationCandidate candidate =
             devicePoolSelector.nextRotationCandidate(runtimeProfileManager.getRuntimeProfile());
         if (candidate == null) {
@@ -234,6 +279,26 @@ public class FQDeviceRotationService {
             reason
         );
         return true;
+    }
+
+    private boolean markCurrentDeviceRiskCooldown(String reason) {
+        PgDevicePoolService pgDevicePoolService = pgDevicePoolServiceProvider.getIfAvailable();
+        if (pgDevicePoolService == null) {
+            return false;
+        }
+        return pgDevicePoolService.markRiskCooldown(
+            runtimeProfileManager.getRuntimeProfile(),
+            reason,
+            fqApiProperties.getDevicePoolRiskCooldownMs()
+        );
+    }
+
+    private void enterDegradedMode(String reason) {
+        runtimeProfileManager.clearRuntimeProfile();
+        devicePoolSelector.clearActiveProfile();
+        if (Texts.hasText(reason)) {
+            log.warn("设备运行时进入降级态：{}", reason);
+        }
     }
 
     private boolean isInRotateCooldown(boolean ignoreCooldown, long nowMs, long cooldownMs) {

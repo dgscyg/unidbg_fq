@@ -26,6 +26,8 @@ public class FQApiProperties {
     private boolean devicePoolProbeOnStartup = false;
     private int devicePoolProbeMaxAttempts = 3;
     private long deviceRotateCooldownMs = 30_000L;
+    private boolean devicePoolAllowEmpty = true;
+    private long devicePoolRiskCooldownMs = 12 * 60 * 60 * 1000L;
     private int registerKeyCacheMaxEntries = 32;
     private long registerKeyCacheTtlMs = 60 * 60 * 1000L;
 
@@ -117,6 +119,22 @@ public class FQApiProperties {
         this.deviceRotateCooldownMs = deviceRotateCooldownMs;
     }
 
+    public boolean isDevicePoolAllowEmpty() {
+        return devicePoolAllowEmpty;
+    }
+
+    public void setDevicePoolAllowEmpty(boolean devicePoolAllowEmpty) {
+        this.devicePoolAllowEmpty = devicePoolAllowEmpty;
+    }
+
+    public long getDevicePoolRiskCooldownMs() {
+        return devicePoolRiskCooldownMs;
+    }
+
+    public void setDevicePoolRiskCooldownMs(long devicePoolRiskCooldownMs) {
+        this.devicePoolRiskCooldownMs = devicePoolRiskCooldownMs;
+    }
+
     public int getRegisterKeyCacheMaxEntries() {
         return registerKeyCacheMaxEntries;
     }
@@ -141,7 +159,7 @@ public class FQApiProperties {
         private RuntimeProfile(String userAgent, String cookie, Device device) {
             this.userAgent = userAgent;
             this.cookie = cookie;
-            this.device = FQApiDeviceProfiles.copyDevice(device);
+            this.device = device == null ? null : FQApiDeviceProfiles.copyDevice(device);
         }
 
         static RuntimeProfile of(String userAgent, String cookie, Device device) {
@@ -161,7 +179,7 @@ public class FQApiProperties {
         }
 
         public Device getDevice() {
-            return FQApiDeviceProfiles.copyDevice(this.device);
+            return this.device == null ? null : FQApiDeviceProfiles.copyDevice(this.device);
         }
 
         /**

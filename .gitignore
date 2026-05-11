@@ -19,7 +19,16 @@ AGENTS.md
 read_source/
 Dockerfile.bak
 /utils/
+!/utils/
+/utils/*
+!/utils/fq_device_register.py
+!/utils/fq_device_pool_seed.py
+!/utils/TTEncrypt.py
+!/utils/requirements.txt
 logs/
+results/
+__pycache__/
+.env
 META-INF/
 
 !.cursor/

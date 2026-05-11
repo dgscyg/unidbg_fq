@@ -127,6 +127,7 @@ public class FQSearchService {
         if (RequestCacheHelper.isResponseSuccess(response)) {
             FQEncryptServiceWorker.recordUpstreamSuccess();
             autoRestartService.recordSuccess();
+            deviceRotationService.markCurrentDeviceSuccess();
         } else {
             autoRestartService.recordFailure(failureReason);
         }
@@ -197,6 +198,11 @@ public class FQSearchService {
             if (Texts.hasText(enrichedRequest.getSearchId())) {
                 enrichedRequest.setIsFirstEnterSearch(false);
                 FQNovelResponse<FQSearchResponse> response = performSearchInternal(enrichedRequest);
+                if (!RequestCacheHelper.isResponseSuccess(response)
+                    && UpstreamSignedRequestService.isLikelyRiskControl(response != null ? response.message() : null)
+                    && deviceRotationService.handleRiskFailureForce(REASON_SEARCH_WITH_ID_FAIL)) {
+                    response = performSearchInternal(enrichedRequest);
+                }
                 recordSearchOutcome(response, REASON_SEARCH_WITH_ID_FAIL);
                 return SearchContinuation.done(response);
             }
@@ -207,7 +213,7 @@ public class FQSearchService {
             FQNovelResponse<FQSearchResponse> firstResponse = performSearchInternal(firstRequest);
             if (!RequestCacheHelper.isResponseSuccess(firstResponse)
                 && UpstreamSignedRequestService.isLikelyRiskControl(firstResponse != null ? firstResponse.message() : null)
-                && deviceRotationService.rotateIfNeeded(REASON_SEARCH_PHASE1_FAIL)) {
+                && deviceRotationService.handleRiskFailureForce(REASON_SEARCH_PHASE1_FAIL)) {
                 firstResponse = performSearchInternal(firstRequest);
             }
             if (!RequestCacheHelper.isResponseSuccess(firstResponse)) {
@@ -224,6 +230,7 @@ public class FQSearchService {
             if (Texts.isBlank(searchId) && hasBooks(firstResponse)) {
                 log.info("第一阶段未返回search_id，但已返回书籍结果，跳过第二阶段");
                 autoRestartService.recordSuccess();
+                deviceRotationService.markCurrentDeviceSuccess();
                 return SearchContinuation.done(firstResponse);
             }
             if (Texts.isBlank(searchId)) {
@@ -231,8 +238,7 @@ public class FQSearchService {
                     1,
                     Math.min(FQConstants.Search.MAX_RETRIES_PER_DEVICE, downloadProperties.getRetry().getMaxRetries())
                 );
-                List<FQApiProperties.DeviceProfile> pool = fqApiProperties.getDevicePool();
-                int maxDevices = Math.max(1, pool == null ? 0 : pool.size());
+                int maxDevices = Math.max(1, deviceRotationService.availableProfileCount());
                 FQNovelResponse<FQSearchResponse> candidate = firstResponse;
 
                 searchRetry:
@@ -265,6 +271,7 @@ public class FQSearchService {
                         if (hasBooks(candidate)) {
                             log.info("第一阶段未返回search_id，但重试后已返回书籍结果，跳过第二阶段");
                             autoRestartService.recordSuccess();
+                            deviceRotationService.markCurrentDeviceSuccess();
                             return SearchContinuation.done(candidate);
                         }
                     }
@@ -284,7 +291,10 @@ public class FQSearchService {
             String query = searchRequest == null ? null : searchRequest.getQuery();
             log.error("增强搜索失败 - query: {}", query, e);
             autoRestartService.recordFailure(REASON_SEARCH_EXCEPTION);
-            return SearchContinuation.done(FQNovelResponse.error("增强搜索失败: " + e.getMessage()));
+            String message = e instanceof NoAvailableDeviceException
+                ? NoAvailableDeviceException.DEFAULT_MESSAGE
+                : "增强搜索失败: " + e.getMessage();
+            return SearchContinuation.done(FQNovelResponse.error(message));
         }
     }
 
@@ -304,6 +314,11 @@ public class FQSearchService {
         secondRequest.setLastSearchPageInterval(lastSearchPageInterval);
 
         FQNovelResponse<FQSearchResponse> secondResponse = performSearchInternal(secondRequest);
+        if (!RequestCacheHelper.isResponseSuccess(secondResponse)
+            && UpstreamSignedRequestService.isLikelyRiskControl(secondResponse != null ? secondResponse.message() : null)
+            && deviceRotationService.handleRiskFailureForce(REASON_SEARCH_PHASE2_FAIL)) {
+            secondResponse = performSearchInternal(secondRequest);
+        }
         if (secondResponse != null
             && secondResponse.code() != null
             && secondResponse.code() == 0

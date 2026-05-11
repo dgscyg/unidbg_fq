@@ -37,6 +37,8 @@ public class FQDirectoryService {
     private final FQDownloadProperties downloadProperties;
     private final ObjectMapper objectMapper;
     private final UpstreamSignedRequestService upstreamSignedRequestService;
+    private final FQDeviceRotationService deviceRotationService;
+    private final AutoRestartService autoRestartService;
     @Qualifier("applicationTaskExecutor")
     private final Executor taskExecutor;
 
@@ -48,12 +50,16 @@ public class FQDirectoryService {
         FQDownloadProperties downloadProperties,
         ObjectMapper objectMapper,
         UpstreamSignedRequestService upstreamSignedRequestService,
+        FQDeviceRotationService deviceRotationService,
+        AutoRestartService autoRestartService,
         @Qualifier("applicationTaskExecutor") Executor taskExecutor
     ) {
         this.fqApiUtils = fqApiUtils;
         this.downloadProperties = downloadProperties;
         this.objectMapper = objectMapper;
         this.upstreamSignedRequestService = upstreamSignedRequestService;
+        this.deviceRotationService = deviceRotationService;
+        this.autoRestartService = autoRestartService;
         this.taskExecutor = taskExecutor;
     }
 
@@ -117,6 +123,10 @@ public class FQDirectoryService {
             Integer upstreamCode = UpstreamSignedRequestService.nonZeroUpstreamCode(rootNode);
             if (upstreamCode != null) {
                 String upstreamMessage = UpstreamSignedRequestService.upstreamMessageOrDefault(rootNode, "upstream error");
+                if (UpstreamSignedRequestService.isLikelyRiskControl(upstreamMessage)) {
+                    deviceRotationService.handleRiskFailureForce("DIRECTORY_FAIL");
+                }
+                autoRestartService.recordFailure("DIRECTORY_FAIL");
                 UpstreamSignedRequestService.logUpstreamBodyDebug(log, "目录接口上游失败原始响应", responseBody);
                 return FQNovelResponse.error(upstreamCode, upstreamMessage);
             }
@@ -137,11 +147,16 @@ public class FQDirectoryService {
                 FQDirectoryResponseTransformer.enhanceChapterList(directoryResponse);
             }
             FQEncryptServiceWorker.recordUpstreamSuccess();
+            autoRestartService.recordSuccess();
+            deviceRotationService.markCurrentDeviceSuccess();
             return FQNovelResponse.success(directoryResponse);
 
         } catch (Exception e) {
             String bookId = directoryRequest == null ? null : directoryRequest.getBookId();
             log.error("获取书籍目录失败 - bookId: {}", bookId, e);
+            if (e instanceof NoAvailableDeviceException) {
+                return FQNovelResponse.error(NoAvailableDeviceException.DEFAULT_MESSAGE);
+            }
             return directoryFailure(e.getMessage());
         }
     }

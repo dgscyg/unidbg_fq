@@ -1,6 +1,7 @@
 package com.mengying.fqnovel.web;
 
 import com.mengying.fqnovel.dto.FQNovelResponse;
+import com.mengying.fqnovel.service.NoAvailableDeviceException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -93,6 +94,16 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<FQNovelResponse<Void>> handleBadRequest(IllegalArgumentException ex) {
         return buildError(HttpStatus.BAD_REQUEST, messageOrDefault(ex.getMessage(), "bad request"));
+    }
+
+    @ExceptionHandler(NoAvailableDeviceException.class)
+    public ResponseEntity<FQNovelResponse<Void>> handleNoAvailableDevice(NoAvailableDeviceException ex) {
+        if (log.isDebugEnabled()) {
+            log.debug("当前没有可用设备: {}", ex.getMessage());
+        } else {
+            log.warn("当前没有可用设备");
+        }
+        return buildError(HttpStatus.SERVICE_UNAVAILABLE, messageOrDefault(ex.getMessage(), NoAvailableDeviceException.DEFAULT_MESSAGE));
     }
 
     @ExceptionHandler(NoResourceFoundException.class)

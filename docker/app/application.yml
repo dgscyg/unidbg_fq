@@ -1,0 +1,17 @@
+server:
+  port: ${SERVER_PORT:9999}
+  address: ${SERVER_ADDRESS:0.0.0.0}
+
+fq:
+  cache:
+    postgres:
+      url: ${DB_URL:}
+  api:
+    base-url: ${FQ_API_BASE_URL:https://api5-normal-sinfonlineb.fqnovel.com}
+    device-pool-size: ${DEVICE_POOL_SIZE:8}
+    device-pool-shuffle-on-startup: ${DEVICE_POOL_SHUFFLE_ON_STARTUP:true}
+    device-pool-probe-on-startup: ${DEVICE_POOL_PROBE_ON_STARTUP:true}
+    device-pool-probe-max-attempts: ${DEVICE_POOL_PROBE_MAX_ATTEMPTS:3}
+    device-rotate-cooldown-ms: ${DEVICE_ROTATE_COOLDOWN_MS:60000}
+    device-pool-allow-empty: ${DEVICE_POOL_ALLOW_EMPTY:true}
+    device-pool-risk-cooldown-ms: ${DEVICE_POOL_RISK_COOLDOWN_MS:43200000}

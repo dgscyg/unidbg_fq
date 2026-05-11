@@ -4,6 +4,9 @@ import com.mengying.fqnovel.config.FQApiProperties;
 import com.mengying.fqnovel.config.FQApiRuntimeProfileManager;
 import com.mengying.fqnovel.dto.FQDirectoryRequest;
 import com.mengying.fqnovel.dto.FQSearchUpstreamRequest;
+import com.mengying.fqnovel.service.FQDevicePoolSelector;
+import com.mengying.fqnovel.service.FQDeviceProfileApplier;
+import com.mengying.fqnovel.service.NoAvailableDeviceException;
 import org.springframework.stereotype.Component;
 
 import java.net.URLDecoder;
@@ -47,10 +50,20 @@ public class FQApiUtils {
 
     private final FQApiProperties fqApiProperties;
     private final FQApiRuntimeProfileManager runtimeProfileManager;
+    private final FQDevicePoolSelector devicePoolSelector;
+    private final FQDeviceProfileApplier deviceProfileApplier;
+    private final Object runtimeProfileActivationLock = new Object();
 
-    public FQApiUtils(FQApiProperties fqApiProperties, FQApiRuntimeProfileManager runtimeProfileManager) {
+    public FQApiUtils(
+        FQApiProperties fqApiProperties,
+        FQApiRuntimeProfileManager runtimeProfileManager,
+        FQDevicePoolSelector devicePoolSelector,
+        FQDeviceProfileApplier deviceProfileApplier
+    ) {
         this.fqApiProperties = fqApiProperties;
         this.runtimeProfileManager = runtimeProfileManager;
+        this.devicePoolSelector = devicePoolSelector;
+        this.deviceProfileApplier = deviceProfileApplier;
     }
 
     /**
@@ -353,10 +366,44 @@ public class FQApiUtils {
     private FQApiProperties.Device requireRuntimeDevice() {
         FQApiProperties.RuntimeProfile runtimeProfile = runtimeProfileManager == null ? null : runtimeProfileManager.getRuntimeProfile();
         FQApiProperties.Device device = runtimeProfile == null ? null : runtimeProfile.getDeviceUnsafe();
-        if (device == null) {
-            throw new IllegalStateException("缺少设备配置：fq.api.device");
+        if (device != null) {
+            return device;
         }
-        return device;
+
+        synchronized (runtimeProfileActivationLock) {
+            runtimeProfile = runtimeProfileManager == null ? null : runtimeProfileManager.getRuntimeProfile();
+            device = runtimeProfile == null ? null : runtimeProfile.getDeviceUnsafe();
+            if (device != null) {
+                return device;
+            }
+
+            if (devicePoolSelector == null || deviceProfileApplier == null) {
+                throw new NoAvailableDeviceException();
+            }
+            java.util.List<FQApiProperties.DeviceProfile> pool = devicePoolSelector.effectivePool();
+            if (pool == null || pool.isEmpty()) {
+                throw new NoAvailableDeviceException();
+            }
+
+            int selectedIndex = devicePoolSelector.resolveStartupIndex(pool);
+            if (selectedIndex < 0 || selectedIndex >= pool.size()) {
+                throw new NoAvailableDeviceException();
+            }
+
+            FQApiProperties.DeviceProfile profile = pool.get(selectedIndex);
+            if (!deviceProfileApplier.apply(profile)) {
+                throw new NoAvailableDeviceException("当前没有可应用的设备配置，请检查 PostgreSQL 设备池记录是否完整");
+            }
+            devicePoolSelector.markActiveProfile(profile);
+            devicePoolSelector.setNextRotationIndex(selectedIndex, pool.size());
+
+            runtimeProfile = runtimeProfileManager.getRuntimeProfile();
+            device = runtimeProfile == null ? null : runtimeProfile.getDeviceUnsafe();
+            if (device == null) {
+                throw new NoAvailableDeviceException();
+            }
+            return device;
+        }
     }
 
     private static String requireDeviceValue(String value, String fieldName) {

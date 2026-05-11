@@ -4,6 +4,13 @@
 .vscode
 **/*.iml
 
+.trellis
+.claude
+.agents
+.cursor
+
+results/
+
 docs/
 tools/
 
@@ -13,3 +20,4 @@ target/
 *.log
 logs/
 
+.env

@@ -65,9 +65,13 @@ public final class FQApiDeviceProfiles {
             throw new IllegalStateException("fq.api 配置未初始化");
         }
         requireTextValue(properties.getBaseUrl(), "fq.api.base-url");
-        requireTextValue(properties.getUserAgent(), "fq.api.user-agent");
-        requireTextValue(properties.getCookie(), "fq.api.cookie");
-        validateRequiredDevice(properties.getDevice(), DEVICE_CONFIG_PREFIX);
+        if (hasAnyRuntimeConfiguration(properties)) {
+            requireTextValue(properties.getUserAgent(), "fq.api.user-agent");
+            requireTextValue(properties.getCookie(), "fq.api.cookie");
+            validateRequiredDevice(properties.getDevice(), DEVICE_CONFIG_PREFIX);
+        } else if (!properties.isDevicePoolAllowEmpty()) {
+            throw new IllegalStateException("缺少可用设备配置，且 fq.api.device-pool-allow-empty=false");
+        }
         validateDevicePool(properties.getDevicePool());
     }
 
@@ -75,10 +79,34 @@ public final class FQApiDeviceProfiles {
         if (device == null) {
             throw new IllegalStateException("缺少设备配置: " + prefix);
         }
-        requireDeviceValue(device.getInstallId(), prefix + ".install-id");
-        requireDeviceValue(device.getDeviceId(), prefix + ".device-id");
+        requirePositiveNumericDeviceValue(device.getInstallId(), prefix + ".install-id");
+        requirePositiveNumericDeviceValue(device.getDeviceId(), prefix + ".device-id");
         requireDeviceValue(device.getAid(), prefix + ".aid");
         requireDeviceValue(device.getUpdateVersionCode(), prefix + ".update-version-code");
+    }
+
+    static boolean hasAnyRuntimeConfiguration(FQApiProperties properties) {
+        if (properties == null) {
+            return false;
+        }
+        return Texts.hasText(properties.getUserAgent())
+            || Texts.hasText(properties.getCookie())
+            || hasAnyDeviceValue(properties.getDevice());
+    }
+
+    static boolean hasRequiredRuntimeConfiguration(FQApiProperties properties) {
+        return properties != null
+            && Texts.hasText(properties.getUserAgent())
+            && Texts.hasText(properties.getCookie())
+            && hasRequiredDeviceFields(properties.getDevice());
+    }
+
+    static boolean hasRequiredDeviceFields(FQApiProperties.Device device) {
+        return device != null
+            && isPositiveNumericDeviceValue(device.getInstallId())
+            && isPositiveNumericDeviceValue(device.getDeviceId())
+            && Texts.hasText(device.getAid())
+            && Texts.hasText(device.getUpdateVersionCode());
     }
 
     static FQApiProperties.DeviceProfile resolveBootstrapProfile(FQApiProperties properties) {
@@ -99,6 +127,27 @@ public final class FQApiDeviceProfiles {
         }
 
         return devicePool.get(0);
+    }
+
+    private static boolean hasAnyDeviceValue(FQApiProperties.Device device) {
+        if (device == null) {
+            return false;
+        }
+        return Texts.hasText(device.getCdid())
+            || Texts.hasText(device.getInstallId())
+            || Texts.hasText(device.getDeviceId())
+            || Texts.hasText(device.getAid())
+            || Texts.hasText(device.getVersionCode())
+            || Texts.hasText(device.getVersionName())
+            || Texts.hasText(device.getUpdateVersionCode())
+            || Texts.hasText(device.getDeviceType())
+            || Texts.hasText(device.getDeviceBrand())
+            || Texts.hasText(device.getRomVersion())
+            || Texts.hasText(device.getResolution())
+            || Texts.hasText(device.getDpi())
+            || Texts.hasText(device.getHostAbi())
+            || Texts.hasText(device.getOsVersion())
+            || Texts.hasText(device.getOsApi());
     }
 
     private static void validateDevicePool(List<FQApiProperties.DeviceProfile> devicePool) {
@@ -223,6 +272,24 @@ public final class FQApiDeviceProfiles {
     private static void requireDeviceValue(String value, String fieldName) {
         if (!Texts.hasText(value)) {
             throw new IllegalStateException("缺少设备配置字段: " + fieldName);
+        }
+    }
+
+    private static void requirePositiveNumericDeviceValue(String value, String fieldName) {
+        if (!isPositiveNumericDeviceValue(value)) {
+            throw new IllegalStateException("缺少有效设备配置字段: " + fieldName);
+        }
+    }
+
+    private static boolean isPositiveNumericDeviceValue(String value) {
+        String normalized = Texts.trimToNull(value);
+        if (normalized == null || !normalized.chars().allMatch(Character::isDigit)) {
+            return false;
+        }
+        try {
+            return Long.parseLong(normalized) > 0L;
+        } catch (NumberFormatException ignore) {
+            return false;
         }
     }
 

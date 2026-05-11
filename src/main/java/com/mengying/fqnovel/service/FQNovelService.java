@@ -131,6 +131,7 @@ public class FQNovelService {
 
         FQEncryptServiceWorker.recordUpstreamSuccess();
         autoRestartService.recordSuccess();
+        deviceRotationService.markCurrentDeviceSuccess();
         return FQNovelResponse.success(batchResponse);
     }
 
@@ -143,6 +144,9 @@ public class FQNovelService {
         long maxDelayMs
     ) {
         String message = Texts.defaultIfBlank(Texts.trimToEmpty(e.getMessage()), e.getClass().getSimpleName());
+        if (e instanceof NoAvailableDeviceException) {
+            return FQNovelResponse.error(NoAvailableDeviceException.DEFAULT_MESSAGE);
+        }
         String retryReason = UpstreamSignedRequestService.resolveRetryReason(message);
         boolean retryable = retryReason != null;
 
@@ -165,8 +169,12 @@ public class FQNovelService {
             && attempt >= 2)) {
             FQEncryptServiceWorker.requestGlobalReset(retryReason);
         }
-        // 所有可重试异常都遵循设备切换冷却，避免高并发时在设备池里来回抖动。
-        deviceRotationService.rotateIfNeeded(retryReason);
+        // 风险失败进入 12 小时设备冷却；其他可重试异常仍沿用原有短期切换防抖。
+        if (UpstreamSignedRequestService.REASON_ILLEGAL_ACCESS.equals(retryReason)) {
+            deviceRotationService.handleRiskFailureForce(retryReason);
+        } else {
+            deviceRotationService.rotateIfNeeded(retryReason);
+        }
 
         long delay = RetryBackoff.computeDelay(
             baseDelayMs,
@@ -304,6 +312,9 @@ public class FQNovelService {
         String message = resolved == null
             ? "未知错误"
             : Texts.defaultIfBlank(resolved.getMessage(), resolved.toString());
+        if (resolved instanceof NoAvailableDeviceException) {
+            return FQNovelResponse.error(NoAvailableDeviceException.DEFAULT_MESSAGE);
+        }
         return FQNovelResponse.error("获取书籍信息失败: " + message);
     }
 

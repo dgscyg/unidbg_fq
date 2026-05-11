@@ -20,8 +20,8 @@ public class FQApiRuntimeProfileManager {
     @PostConstruct
     public synchronized void initRuntimeProfile() {
         FQApiDeviceProfiles.inheritRuntimeDefaults(fqApiProperties);
-        refreshRuntimeProfileLocked();
         FQApiDeviceProfiles.validateRuntimeConfiguration(fqApiProperties);
+        refreshRuntimeProfileLocked();
     }
 
     public FQApiProperties.RuntimeProfile getRuntimeProfile() {
@@ -32,10 +32,15 @@ public class FQApiRuntimeProfileManager {
         synchronized (this) {
             if (runtimeProfile == null) {
                 FQApiDeviceProfiles.inheritRuntimeDefaults(fqApiProperties);
+                FQApiDeviceProfiles.validateRuntimeConfiguration(fqApiProperties);
                 refreshRuntimeProfileLocked();
             }
             return runtimeProfile;
         }
+    }
+
+    public boolean hasRuntimeProfile() {
+        return FQApiDeviceProfiles.hasRequiredRuntimeConfiguration(fqApiProperties);
     }
 
     public synchronized void applyRuntimeProfile(String userAgent, String cookie, FQApiProperties.Device device) {
@@ -57,11 +62,21 @@ public class FQApiRuntimeProfileManager {
         refreshRuntimeProfileLocked();
     }
 
+    public synchronized void clearRuntimeProfile() {
+        fqApiProperties.setUserAgent(null);
+        fqApiProperties.setCookie(null);
+        fqApiProperties.setDevice(null);
+        refreshRuntimeProfileLocked();
+    }
+
     private void refreshRuntimeProfileLocked() {
+        FQApiProperties.Device runtimeDevice = FQApiDeviceProfiles.hasRequiredDeviceFields(fqApiProperties.getDevice())
+            ? fqApiProperties.getDevice()
+            : null;
         this.runtimeProfile = FQApiProperties.RuntimeProfile.of(
             fqApiProperties.getUserAgent(),
             fqApiProperties.getCookie(),
-            fqApiProperties.getDevice()
+            runtimeDevice
         );
     }
 
