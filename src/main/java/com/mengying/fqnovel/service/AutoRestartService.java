@@ -22,18 +22,15 @@ public class AutoRestartService {
 
     private final FQDownloadProperties downloadProperties;
     private final FQDeviceRotationService deviceRotationService;
-    private final FQRegisterKeyService registerKeyService;
     private final ScheduledExecutorService restartExecutor =
         Executors.newScheduledThreadPool(2, new NamedDaemonThreadFactory("auto-restart-"));
 
     public AutoRestartService(
         FQDownloadProperties downloadProperties,
-        FQDeviceRotationService deviceRotationService,
-        FQRegisterKeyService registerKeyService
+        FQDeviceRotationService deviceRotationService
     ) {
         this.downloadProperties = downloadProperties;
         this.deviceRotationService = deviceRotationService;
-        this.registerKeyService = registerKeyService;
     }
 
     private final AtomicInteger errorCount = new AtomicInteger(0);
@@ -111,36 +108,22 @@ public class AutoRestartService {
         }
         lastSelfHealAtMs = now;
 
-        log.warn("连续异常达到阈值，优先尝试自愈（重置签名服务 / 切换设备）: count={}, threshold={}, reason={}", count, threshold, reason);
+        log.warn("连续异常达到阈值，优先尝试自愈（切换设备）: count={}, threshold={}, reason={}", count, threshold, reason);
         String selfHealReason = prefixedReason(REASON_PREFIX_AUTO_SELF_HEAL, reason);
 
         // 自愈逻辑放后台线程，避免阻塞当前业务线程；失败后仅保留计数并继续运行，不再退出进程。
         restartExecutor.execute(() -> {
-            boolean resetOk = false;
-            boolean invalidateKeyOk = false;
             boolean rotateOk = false;
             try {
-                resetOk = runSelfHealStep("请求重置签名服务失败", () -> {
-                    FQEncryptServiceWorker.requestGlobalReset(selfHealReason);
-                    return true;
-                });
-                invalidateKeyOk = runSelfHealStep("失效当前 registerkey 失败", () -> {
-                    registerKeyService.invalidateCurrentKey();
-                    return true;
-                });
                 rotateOk = runSelfHealStep("切换设备失败", () ->
                     deviceRotationService.forceRotate(selfHealReason)
                 );
             } finally {
                 healing.set(false);
-                if (resetOk && invalidateKeyOk) {
+                if (rotateOk) {
                     recordSuccess();
-                    if (!rotateOk) {
-                        log.warn("自愈未完成设备切换，但签名服务/registerkey 已刷新成功: rotateOk={}", rotateOk);
-                    }
                 } else {
-                    log.warn("自愈未完全成功，保留错误计数并继续运行: resetOk={}, invalidateKeyOk={}, rotateOk={}",
-                        resetOk, invalidateKeyOk, rotateOk);
+                    log.warn("自愈未完成设备切换，保留错误计数并继续运行: rotateOk={}", rotateOk);
                 }
             }
         });

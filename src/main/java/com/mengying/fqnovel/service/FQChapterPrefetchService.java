@@ -597,7 +597,6 @@ public class FQChapterPrefetchService {
         if (!UpstreamSignedRequestService.REASON_CHAPTER_EMPTY_OR_SHORT.equals(retryReason)) {
             return;
         }
-        FQEncryptServiceWorker.requestGlobalReset(retryReason);
         autoRestartService.recordFailure(retryReason);
     }
 

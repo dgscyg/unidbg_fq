@@ -125,7 +125,6 @@ public class FQSearchService {
 
     private void recordSearchOutcome(FQNovelResponse<?> response, String failureReason) {
         if (RequestCacheHelper.isResponseSuccess(response)) {
-            FQEncryptServiceWorker.recordUpstreamSuccess();
             autoRestartService.recordSuccess();
             deviceRotationService.markCurrentDeviceSuccess();
         } else {

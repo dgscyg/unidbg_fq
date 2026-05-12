@@ -146,7 +146,6 @@ public class FQDirectoryService {
             } else {
                 FQDirectoryResponseTransformer.enhanceChapterList(directoryResponse);
             }
-            FQEncryptServiceWorker.recordUpstreamSuccess();
             autoRestartService.recordSuccess();
             deviceRotationService.markCurrentDeviceSuccess();
             return FQNovelResponse.success(directoryResponse);

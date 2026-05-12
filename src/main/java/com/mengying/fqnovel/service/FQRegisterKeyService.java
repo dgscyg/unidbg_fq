@@ -124,7 +124,6 @@ public class FQRegisterKeyService {
         long expiresAt = putCache(keyver, response);
         currentRegisterKey = response;
         currentRegisterKeyExpiresAtMs = expiresAt;
-        FQEncryptServiceWorker.recordUpstreamSuccess();
         log.debug("registerkey 刷新成功：keyver={}", keyver);
         return response;
     }

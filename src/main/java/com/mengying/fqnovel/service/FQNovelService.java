@@ -129,7 +129,6 @@ public class FQNovelService {
             return FQNovelResponse.error((int) batchResponse.code(), msg);
         }
 
-        FQEncryptServiceWorker.recordUpstreamSuccess();
         autoRestartService.recordSuccess();
         deviceRotationService.markCurrentDeviceSuccess();
         return FQNovelResponse.success(batchResponse);
@@ -164,11 +163,6 @@ public class FQNovelService {
             return FQNovelResponse.error(CHAPTER_FETCH_FAILURE_PREFIX + message);
         }
 
-        if (UpstreamSignedRequestService.REASON_SIGNER_FAIL.equals(retryReason)
-            || (UpstreamSignedRequestService.REASON_UPSTREAM_EMPTY.equals(retryReason)
-            && attempt >= 2)) {
-            FQEncryptServiceWorker.requestGlobalReset(retryReason);
-        }
         // 风险失败进入 12 小时设备冷却；其他可重试异常仍沿用原有短期切换防抖。
         if (UpstreamSignedRequestService.REASON_ILLEGAL_ACCESS.equals(retryReason)) {
             deviceRotationService.handleRiskFailureForce(retryReason);

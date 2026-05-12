@@ -35,38 +35,6 @@ public class FQEncryptService {
         log.info("签名服务初始化完成");
     }
 
-    public void reset(String reason) {
-        if (ProcessLifecycle.isShuttingDown()) {
-            log.warn("进程退出中，跳过签名服务重置: reason={}", reason);
-            return;
-        }
-        lock.lock();
-        try {
-            IdleFQ old = this.idleFQ;
-            IdleFQ replacement;
-            boolean oldDestroyedForRetry = false;
-
-            try {
-                replacement = createIdleFq();
-            } catch (OutOfMemoryError oom) {
-                // 在容器内存偏紧时，先销毁旧实例再重试一次，避免短时间双 signer 共存放大内存峰值。
-                log.warn("重置签名服务时创建新实例内存不足，先释放旧实例后重试: reason={}", reason, oom);
-                this.idleFQ = null;
-                destroySignerQuietly(old);
-                oldDestroyedForRetry = true;
-                replacement = createIdleFq();
-            }
-
-            this.idleFQ = replacement;
-            if (!oldDestroyedForRetry) {
-                destroySignerQuietly(old);
-            }
-            log.warn("签名服务已重置，reason={}", reason);
-        } finally {
-            lock.unlock();
-        }
-    }
-
     private IdleFQ createIdleFq() {
         return new IdleFQ(properties.isVerbose(), properties.getApkPath(), properties.getApkClasspath());
     }
@@ -346,16 +314,5 @@ public class FQEncryptService {
         TempFileUtils.cleanup();
 
         log.info("签名服务资源释放完成");
-    }
-
-    private static void destroySignerQuietly(IdleFQ signer) {
-        if (signer == null) {
-            return;
-        }
-        try {
-            signer.destroy();
-        } catch (Exception ignored) {
-            // ignore
-        }
     }
 }

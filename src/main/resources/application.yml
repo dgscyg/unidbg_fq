@@ -16,11 +16,6 @@ spring:
     virtual:
       enabled: true
 
-application:
-  unidbg:
-    reset-cooldown-ms: 2000
-    upstream-empty-reset-cooldown-ms: 8000
-
 fq:
   cache:
     postgres:
