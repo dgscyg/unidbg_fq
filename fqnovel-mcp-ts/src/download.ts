@@ -406,7 +406,7 @@ async function fetchChaptersViaBatch(
 ): Promise<{ chapters: DownloadChapter[]; batchInfo: BatchRequestInfo }> {
   const batchSize = clamp(options.batchSize, 1, MAX_BATCH_CHAPTERS_PER_REQUEST);
   const batches = chunkArray(selected, batchSize);
-  const normalizedConcurrency = clamp(concurrency, 1, 20);
+  const normalizedConcurrency = clamp(concurrency, 1, 30);
   const totalBatches = batches.length;
   const showProgress = process.env.FQNOVEL_PROGRESS === "1";
 

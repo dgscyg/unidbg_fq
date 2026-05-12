@@ -50,7 +50,7 @@ export function loadConfig(): AppConfig {
       process.env.FQNOVEL_DOWNLOAD_CONCURRENCY,
       DEFAULT_DOWNLOAD_CONCURRENCY,
       1,
-      20,
+      30,
     ),
     outputDir: process.env.FQNOVEL_OUTPUT_DIR?.trim()
       ? resolve(process.env.FQNOVEL_OUTPUT_DIR)

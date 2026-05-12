@@ -18,7 +18,7 @@
 
 - `FQNOVEL_BASE_URL`：上游服务地址，默认 `http://127.0.0.1:9999`
 - `FQNOVEL_TIMEOUT_MS`：单次请求超时，默认 `30000`
-- `FQNOVEL_DOWNLOAD_CONCURRENCY`：批量下载默认并发，默认 `5`
+- `FQNOVEL_DOWNLOAD_CONCURRENCY`：批量下载默认并发，默认 `5`，最大 `30`
 - `FQNOVEL_OUTPUT_DIR`：下载输出相对路径的基准目录，默认当前工作目录
 - `FQNOVEL_PROGRESS`：设为 `1` 时，在长时间下载 / EPUB 导出期间输出批次进度日志
 
