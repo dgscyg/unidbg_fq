@@ -58,7 +58,6 @@ fq:
       upstream-empty-error-threshold: 8
       window-ms: 300000
       min-interval-ms: 120000
-      force-halt-after-ms: 10000
       self-heal-enabled: true
       self-heal-cooldown-ms: 180000
   api:

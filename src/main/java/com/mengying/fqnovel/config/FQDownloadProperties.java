@@ -265,10 +265,8 @@ public class FQDownloadProperties {
         private int upstreamEmptyErrorThreshold = 8;
         private long windowMs = 5 * 60 * 1000L;
         private long minIntervalMs = 60 * 1000L;
-        private long forceHaltAfterMs = 10_000L;
         private boolean selfHealEnabled = true;
         private long selfHealCooldownMs = 60 * 1000L;
-        private long exitDelayMs = 5_000L;
 
         public boolean isEnabled() {
             return enabled;
@@ -310,14 +308,6 @@ public class FQDownloadProperties {
             this.minIntervalMs = minIntervalMs;
         }
 
-        public long getForceHaltAfterMs() {
-            return forceHaltAfterMs;
-        }
-
-        public void setForceHaltAfterMs(long forceHaltAfterMs) {
-            this.forceHaltAfterMs = forceHaltAfterMs;
-        }
-
         public boolean isSelfHealEnabled() {
             return selfHealEnabled;
         }
@@ -332,14 +322,6 @@ public class FQDownloadProperties {
 
         public void setSelfHealCooldownMs(long selfHealCooldownMs) {
             this.selfHealCooldownMs = selfHealCooldownMs;
-        }
-
-        public long getExitDelayMs() {
-            return exitDelayMs;
-        }
-
-        public void setExitDelayMs(long exitDelayMs) {
-            this.exitDelayMs = exitDelayMs;
         }
     }
 }

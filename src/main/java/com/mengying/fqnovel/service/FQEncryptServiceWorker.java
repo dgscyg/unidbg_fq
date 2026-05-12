@@ -76,8 +76,7 @@ public class FQEncryptServiceWorker {
 
     private static boolean isEscalatedReset(String reason) {
         return reason != null
-            && (reason.startsWith("AUTO_SELF_HEAL:")
-            || reason.startsWith("AUTO_RESTART:"));
+            && reason.startsWith("AUTO_SELF_HEAL:");
     }
 
     public static void recordUpstreamSuccess() {

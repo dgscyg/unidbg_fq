@@ -1,7 +1,6 @@
 package com.mengying.fqnovel.service;
 
 import com.mengying.fqnovel.config.FQDownloadProperties;
-import com.mengying.fqnovel.utils.ProcessLifecycle;
 import com.mengying.fqnovel.utils.Texts;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -11,7 +10,6 @@ import jakarta.annotation.PreDestroy;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadFactory;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
@@ -20,7 +18,6 @@ import java.util.function.Supplier;
 public class AutoRestartService {
 
     private static final Logger log = LoggerFactory.getLogger(AutoRestartService.class);
-    private static final String REASON_PREFIX_AUTO_RESTART = "AUTO_RESTART:";
     private static final String REASON_PREFIX_AUTO_SELF_HEAL = "AUTO_SELF_HEAL:";
 
     private final FQDownloadProperties downloadProperties;
@@ -46,14 +43,12 @@ public class AutoRestartService {
     private volatile long upstreamEmptyWindowStartMs = 0L;
     private volatile long lastRestartAtMs = 0L;
     private volatile long lastSelfHealAtMs = 0L;
-    private final AtomicBoolean restarting = new AtomicBoolean(false);
 
     public synchronized void recordSuccess() {
         errorCount.set(0);
         upstreamEmptyErrorCount.set(0);
         windowStartMs = 0L;
         upstreamEmptyWindowStartMs = 0L;
-        restarting.set(false);
     }
 
     public void recordFailure(String reason) {
@@ -85,10 +80,6 @@ public class AutoRestartService {
             return;
         }
 
-        if (restarting.get()) {
-            return;
-        }
-
         if (trySelfHeal(reason, now, count, threshold)) {
             return;
         }
@@ -99,32 +90,7 @@ public class AutoRestartService {
         }
         lastRestartAtMs = now;
 
-        // 使用 CAS 确保只有一个线程能进入重启流程
-        if (!restarting.compareAndSet(false, true)) {
-            return;
-        }
-
-        ProcessLifecycle.markShuttingDown(prefixedReason(REASON_PREFIX_AUTO_RESTART, reason));
-
-        log.error("连续异常达到阈值，准备退出进程触发重启: count={}, threshold={}, reason={}", count, threshold, reason);
-        int exitCode = 2;
-        long exitDelayMs = autoRestartExitDelayMs();
-        restartExecutor.schedule(() -> {
-            try {
-                System.exit(exitCode);
-            } catch (Throwable t) {
-                Runtime.getRuntime().halt(exitCode);
-            }
-        }, exitDelayMs, TimeUnit.MILLISECONDS);
-
-        long forceHaltAfterMs = autoRestartForceHaltAfterMs();
-        if (forceHaltAfterMs > 0) {
-            restartExecutor.schedule(() -> {
-                // 如果 System.exit 因 shutdown hook 卡住，这里会强制结束，保证 Docker/systemd 能拉起
-                log.error("System.exit 未能在期望时间内退出，强制 halt 结束进程: exitCode={}, waitedMs={}", exitCode, forceHaltAfterMs);
-                Runtime.getRuntime().halt(exitCode);
-            }, forceHaltAfterMs, TimeUnit.MILLISECONDS);
-        }
+        log.error("连续异常达到阈值，但已禁用自动退出重启: count={}, threshold={}, reason={}", count, threshold, reason);
     }
 
     private boolean trySelfHeal(String reason, long now, int count, int threshold) {
@@ -148,7 +114,7 @@ public class AutoRestartService {
         log.warn("连续异常达到阈值，优先尝试自愈（重置签名服务 / 切换设备）: count={}, threshold={}, reason={}", count, threshold, reason);
         String selfHealReason = prefixedReason(REASON_PREFIX_AUTO_SELF_HEAL, reason);
 
-        // 自愈逻辑放后台线程，避免阻塞当前业务线程；失败也不影响后续退回到 auto-restart。
+        // 自愈逻辑放后台线程，避免阻塞当前业务线程；失败后仅保留计数并继续运行，不再退出进程。
         restartExecutor.execute(() -> {
             boolean resetOk = false;
             boolean invalidateKeyOk = false;
@@ -173,7 +139,7 @@ public class AutoRestartService {
                         log.warn("自愈未完成设备切换，但签名服务/registerkey 已刷新成功: rotateOk={}", rotateOk);
                     }
                 } else {
-                    log.warn("自愈未完全成功，保留错误计数以便必要时触发重启: resetOk={}, invalidateKeyOk={}, rotateOk={}",
+                    log.warn("自愈未完全成功，保留错误计数并继续运行: resetOk={}, invalidateKeyOk={}, rotateOk={}",
                         resetOk, invalidateKeyOk, rotateOk);
                 }
             }
@@ -202,14 +168,6 @@ public class AutoRestartService {
 
     private long autoRestartMinIntervalMs() {
         return Math.max(0L, downloadProperties.getAutoRestart().getMinIntervalMs());
-    }
-
-    private long autoRestartExitDelayMs() {
-        return Math.max(0L, downloadProperties.getAutoRestart().getExitDelayMs());
-    }
-
-    private long autoRestartForceHaltAfterMs() {
-        return Math.max(0L, downloadProperties.getAutoRestart().getForceHaltAfterMs());
     }
 
     private long selfHealCooldownMs() {
