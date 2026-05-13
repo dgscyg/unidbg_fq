@@ -18,7 +18,7 @@
 
 - `FQNOVEL_BASE_URL`：上游服务地址，默认 `http://127.0.0.1:9999`
 - `FQNOVEL_TIMEOUT_MS`：单次请求超时，默认 `30000`
-- `FQNOVEL_DOWNLOAD_CONCURRENCY`：批量下载默认并发，默认 `5`，最大 `30`
+- `FQNOVEL_DOWNLOAD_CONCURRENCY`：`fqnovel_download` 默认并发，默认 `5`，最大 `30`；`fqnovel_epub` 固定按 30 章一批串行抓取，不使用这个并发值
 - `FQNOVEL_OUTPUT_DIR`：下载输出相对路径的基准目录，默认当前工作目录
 - `FQNOVEL_PROGRESS`：设为 `1` 时，在长时间下载 / EPUB 导出期间输出批次进度日志
 
@@ -98,6 +98,13 @@ npm run dev
 
 默认使用纯文本段落渲染；传 `useHtmlStyle=true` 时会尽量保留上游原始 HTML 样式后再写入 EPUB。
 
-整本导出内部按 10 章批次抓取；当某个批次持续空响应时，会自动重试、拆小批次，并在必要时回退到单章接口继续导出。需要观察进度时可设置 `FQNOVEL_PROGRESS=1`。
+整本导出内部固定按 30 章一批串行抓取；只有当前 30 章批次完成后，才会继续请求下一批。某个批次持续空响应时，会自动重试、拆小批次，并在必要时回退到单章接口继续导出。需要观察进度时可设置 `FQNOVEL_PROGRESS=1`。
+
+为了支持断点续传，EPUB 导出会在输出文件旁边维护一个 `${outputPath}.resume` 目录：
+
+- 每个成功批次会立刻落盘缓存
+- 同一本书、相同章节范围、相同正文样式下重跑，会优先复用已完成批次
+- 如果 `bookId` / `startChapter` / `endChapter` / `useHtmlStyle` 对不上，旧缓存会自动作废并重建
+- 导出成功后默认会自动删除该目录；传 `keepResumeCache=true` 时才保留
 
 默认会把 `.epub` 写到 `FQNOVEL_OUTPUT_DIR` 或当前工作目录。

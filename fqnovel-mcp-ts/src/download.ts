@@ -1,4 +1,5 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, extname, isAbsolute, resolve } from "node:path";
 import JSZip from "jszip";
 import sharp from "sharp";
@@ -23,10 +24,11 @@ import type {
 import { clamp } from "./utils.js";
 
 const MAX_BATCH_CHAPTERS_PER_REQUEST = 30;
-const EPUB_BATCH_SIZE = 10;
-const EPUB_BATCH_DELAY_MS = 1_500;
+const EPUB_BATCH_SIZE = MAX_BATCH_CHAPTERS_PER_REQUEST;
+const EPUB_BATCH_DELAY_MS = 0;
 const EPUB_BATCH_RETRY_MAX_ATTEMPTS = 3;
 const EPUB_BATCH_RETRY_DELAY_MS = 65_000;
+const EPUB_RESUME_VERSION = 1;
 
 interface DownloadPreparation {
   book: Required<Pick<BookInfo, "bookId">> & BookInfo;
@@ -46,6 +48,25 @@ interface BatchFetchOptions {
   delayMs: number;
   retryMaxAttempts: number;
   retryDelayMs: number;
+}
+
+interface EpubResumeMetadata {
+  version: number;
+  bookId: string;
+  contentStyle: ContentStyle;
+  includeRawContent: boolean;
+  batchSize: number;
+  totalBatches: number;
+  chapterRange: DownloadResult["chapterRange"];
+  selectedSignature: string;
+}
+
+interface EpubResumeBatchCache {
+  version: number;
+  bookId: string;
+  batchIndex: number;
+  batchSignature: string;
+  chapters: DownloadChapter[];
 }
 
 function normalizeBookInfo(book: BookInfo, fallbackBookId: string): Required<Pick<BookInfo, "bookId">> & BookInfo {
@@ -120,6 +141,158 @@ function chunkArray<T>(items: T[], size: number): T[][] {
     result.push(items.slice(index, index + size));
   }
   return result;
+}
+
+function sha1(value: string): string {
+  return createHash("sha1").update(value).digest("hex");
+}
+
+function buildSelectedSignature(
+  selected: TocChapter[],
+  contentStyle: ContentStyle,
+  includeRawContent: boolean,
+): string {
+  return sha1(
+    JSON.stringify({
+      contentStyle,
+      includeRawContent,
+      chapters: selected.map((chapter) => [chapter.index, chapter.chapterId, chapter.title, chapter.isFree ?? null]),
+    }),
+  );
+}
+
+function buildBatchSignature(batch: TocChapter[]): string {
+  return sha1(
+    JSON.stringify(batch.map((chapter) => [chapter.index, chapter.chapterId, chapter.title, chapter.isFree ?? null])),
+  );
+}
+
+function buildEpubResumeDirPath(outputPath: string): string {
+  return `${outputPath}.resume`;
+}
+
+function buildEpubResumeMetaPath(resumeDir: string): string {
+  return resolve(resumeDir, "meta.json");
+}
+
+function buildEpubResumeBatchPath(resumeDir: string, batchIndex: number): string {
+  return resolve(resumeDir, `batch-${String(batchIndex + 1).padStart(4, "0")}.json`);
+}
+
+async function readJsonFileIfExists<T>(path: string): Promise<T | null> {
+  try {
+    const raw = await readFile(path, "utf8");
+    return JSON.parse(raw) as T;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException | undefined)?.code;
+    if (code === "ENOENT") {
+      return null;
+    }
+    if (error instanceof SyntaxError) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+function isSameResumeMetadata(expected: EpubResumeMetadata, actual: EpubResumeMetadata | null): boolean {
+  if (!actual) {
+    return false;
+  }
+
+  return (
+    actual.version === expected.version
+    && actual.bookId === expected.bookId
+    && actual.contentStyle === expected.contentStyle
+    && actual.includeRawContent === expected.includeRawContent
+    && actual.batchSize === expected.batchSize
+    && actual.totalBatches === expected.totalBatches
+    && actual.chapterRange.start === expected.chapterRange.start
+    && actual.chapterRange.end === expected.chapterRange.end
+    && actual.chapterRange.totalSelected === expected.chapterRange.totalSelected
+    && actual.chapterRange.totalAvailable === expected.chapterRange.totalAvailable
+    && actual.selectedSignature === expected.selectedSignature
+  );
+}
+
+function isValidCachedChapter(chapter: unknown, expected: TocChapter, contentStyle: ContentStyle): chapter is DownloadChapter {
+  if (!chapter || typeof chapter !== "object") {
+    return false;
+  }
+
+  const candidate = chapter as DownloadChapter;
+  return (
+    candidate.index === expected.index
+    && candidate.chapterId === expected.chapterId
+    && typeof candidate.title === "string"
+    && typeof candidate.content === "string"
+    && candidate.content.trim().length > 0
+    && candidate.contentStyle === contentStyle
+  );
+}
+
+async function ensureEpubResumeMetadata(
+  resumeDir: string,
+  metadata: EpubResumeMetadata,
+): Promise<void> {
+  const metaPath = buildEpubResumeMetaPath(resumeDir);
+  const existing = await readJsonFileIfExists<EpubResumeMetadata>(metaPath);
+
+  if (!isSameResumeMetadata(metadata, existing)) {
+    await rm(resumeDir, { recursive: true, force: true });
+  }
+
+  await mkdir(resumeDir, { recursive: true });
+  await writeFile(metaPath, JSON.stringify(metadata, null, 2), "utf8");
+}
+
+async function loadEpubCachedBatch(
+  resumeDir: string,
+  bookId: string,
+  batchIndex: number,
+  batch: TocChapter[],
+  contentStyle: ContentStyle,
+): Promise<DownloadChapter[] | null> {
+  const filePath = buildEpubResumeBatchPath(resumeDir, batchIndex);
+  const cached = await readJsonFileIfExists<EpubResumeBatchCache>(filePath);
+  const expectedSignature = buildBatchSignature(batch);
+
+  if (
+    !cached
+    || cached.version !== EPUB_RESUME_VERSION
+    || cached.bookId !== bookId
+    || cached.batchIndex !== batchIndex
+    || cached.batchSignature !== expectedSignature
+    || !Array.isArray(cached.chapters)
+    || cached.chapters.length !== batch.length
+    || cached.chapters.some((chapter, index) => !isValidCachedChapter(chapter, batch[index], contentStyle))
+  ) {
+    if (cached) {
+      await rm(filePath, { force: true });
+    }
+    return null;
+  }
+
+  return cached.chapters;
+}
+
+async function saveEpubCachedBatch(
+  resumeDir: string,
+  bookId: string,
+  batchIndex: number,
+  batch: TocChapter[],
+  chapters: DownloadChapter[],
+): Promise<void> {
+  const payload: EpubResumeBatchCache = {
+    version: EPUB_RESUME_VERSION,
+    bookId,
+    batchIndex,
+    batchSignature: buildBatchSignature(batch),
+    chapters,
+  };
+
+  await mkdir(resumeDir, { recursive: true });
+  await writeFile(buildEpubResumeBatchPath(resumeDir, batchIndex), JSON.stringify(payload, null, 2), "utf8");
 }
 
 function sleep(ms: number): Promise<void> {
@@ -403,13 +576,73 @@ async function fetchChaptersViaBatch(
   includeRawContent: boolean,
   concurrency: number,
   options: BatchFetchOptions,
+  resumeDir?: string,
 ): Promise<{ chapters: DownloadChapter[]; batchInfo: BatchRequestInfo }> {
   const batchSize = clamp(options.batchSize, 1, MAX_BATCH_CHAPTERS_PER_REQUEST);
   const batches = chunkArray(selected, batchSize);
-  const normalizedConcurrency = clamp(concurrency, 1, 30);
   const totalBatches = batches.length;
   const showProgress = process.env.FQNOVEL_PROGRESS === "1";
 
+  if (resumeDir) {
+    const chapters: DownloadChapter[] = [];
+    let requestCount = 0;
+    let cacheHitBatches = 0;
+    let cachedChapters = 0;
+
+    for (const [index, batch] of batches.entries()) {
+      if (showProgress) {
+        const startIndex = batch[0]?.index ?? index * batchSize + 1;
+        const endIndex = batch[batch.length - 1]?.index ?? startIndex;
+        console.error(
+          `[fqnovel] batch ${index + 1}/${totalBatches} start chapters ${startIndex}-${endIndex} style=${contentStyle}`,
+        );
+      }
+
+      const cached = await loadEpubCachedBatch(resumeDir, bookId, index, batch, contentStyle);
+      if (cached) {
+        cacheHitBatches += 1;
+        cachedChapters += cached.length;
+        chapters.push(...cached);
+        if (showProgress) {
+          console.error(`[fqnovel] batch ${index + 1}/${totalBatches} cache-hit chapters=${cached.length}`);
+        }
+        continue;
+      }
+
+      if (requestCount > 0) {
+        await sleep(options.delayMs);
+      }
+
+      const result = await fetchBatchAdaptive(
+        client,
+        bookId,
+        batch,
+        contentStyle,
+        includeRawContent,
+        options,
+        showProgress,
+      );
+      await saveEpubCachedBatch(resumeDir, bookId, index, batch, result);
+      requestCount += 1;
+      chapters.push(...result);
+      if (showProgress) {
+        console.error(`[fqnovel] batch ${index + 1}/${totalBatches} done chapters=${result.length}`);
+      }
+    }
+
+    return {
+      chapters,
+      batchInfo: {
+        batchSize,
+        requestCount,
+        totalBatches,
+        cacheHitBatches,
+        cachedChapters,
+      },
+    };
+  }
+
+  const normalizedConcurrency = clamp(concurrency, 1, 30);
   const batchResults = await mapWithConcurrency(batches, normalizedConcurrency, async (batch, index) => {
     if (showProgress) {
       const startIndex = batch[0]?.index ?? index * batchSize + 1;
@@ -441,6 +674,7 @@ async function fetchChaptersViaBatch(
     batchInfo: {
       batchSize,
       requestCount: batches.length,
+      totalBatches,
     },
   };
 }
@@ -748,19 +982,39 @@ export async function buildEpub(
 ): Promise<EpubResult> {
   const prepared = await prepareDownload(client, options.bookId, options.startChapter, options.endChapter);
   const contentStyle = resolveContentStyle(options.useHtmlStyle);
+  const includeRawContent = contentStyle === "html";
+  const keepResumeCache = options.keepResumeCache === true;
+  const outputPath = options.outputPath
+    ? resolveOutputPath(config, options.outputPath)
+    : defaultEpubOutputPath(config, prepared.book);
+  const resumeDir = buildEpubResumeDirPath(outputPath);
+  const totalBatches = chunkArray(prepared.selected, EPUB_BATCH_SIZE).length;
+
+  await ensureEpubResumeMetadata(resumeDir, {
+    version: EPUB_RESUME_VERSION,
+    bookId: options.bookId,
+    contentStyle,
+    includeRawContent,
+    batchSize: EPUB_BATCH_SIZE,
+    totalBatches,
+    chapterRange: prepared.chapterRange,
+    selectedSignature: buildSelectedSignature(prepared.selected, contentStyle, includeRawContent),
+  });
+
   const { chapters, batchInfo } = await fetchChaptersViaBatch(
     client,
     options.bookId,
     prepared.selected,
     contentStyle,
-    contentStyle === "html",
-    options.concurrency ?? config.downloadConcurrency,
+    includeRawContent,
+    1,
     {
       batchSize: EPUB_BATCH_SIZE,
       delayMs: EPUB_BATCH_DELAY_MS,
       retryMaxAttempts: EPUB_BATCH_RETRY_MAX_ATTEMPTS,
       retryDelayMs: EPUB_BATCH_RETRY_DELAY_MS,
     },
+    resumeDir,
   );
 
   const { asset: coverAsset, error: coverError } = await fetchCoverAsset(prepared.book.coverUrl);
@@ -797,10 +1051,10 @@ export async function buildEpub(
     compressionOptions: { level: 6 },
   });
 
-  const outputPath = options.outputPath
-    ? resolveOutputPath(config, options.outputPath)
-    : defaultEpubOutputPath(config, prepared.book);
   const output = await writeBinaryOutput(config, outputPath, epubBuffer, "epub");
+  if (!keepResumeCache) {
+    await rm(resumeDir, { recursive: true, force: true });
+  }
 
   return {
     book: prepared.book,
@@ -808,6 +1062,8 @@ export async function buildEpub(
     contentStyle,
     batchInfo,
     output,
+    resumeDir,
+    resumeCacheKept: keepResumeCache,
     coverUrl: prepared.book.coverUrl,
     coverEmbedded: Boolean(coverAsset),
     coverError,

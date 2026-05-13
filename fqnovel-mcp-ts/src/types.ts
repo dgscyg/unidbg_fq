@@ -110,6 +110,9 @@ export interface DownloadOutput {
 export interface BatchRequestInfo {
   batchSize: number;
   requestCount: number;
+  totalBatches?: number;
+  cacheHitBatches?: number;
+  cachedChapters?: number;
 }
 
 export interface DownloadResult {
@@ -138,6 +141,8 @@ export interface EpubResult {
   contentStyle: ContentStyle;
   batchInfo: BatchRequestInfo;
   output: DownloadOutput;
+  resumeDir: string;
+  resumeCacheKept: boolean;
   coverUrl?: string;
   coverEmbedded: boolean;
   coverError?: string;
@@ -161,5 +166,6 @@ export interface EpubOptions {
   endChapter?: number;
   concurrency?: number;
   useHtmlStyle?: boolean;
+  keepResumeCache?: boolean;
   outputPath?: string;
 }

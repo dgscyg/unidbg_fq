@@ -180,13 +180,14 @@ registerTool(
 
 registerTool(
   "fqnovel_epub",
-  "整本小说 EPUB 下载。内部按批量章节接口分批拉取正文，支持切换 txt 纯文本或原始 HTML 样式并输出 epub 文件。",
+  "整本小说 EPUB 下载。内部固定按 30 章一批串行拉取正文，支持本地断点续传；成功后默认清理断点缓存，传 keepResumeCache=true 时保留。",
   z.object({
     bookId: numericIdSchema("bookId"),
     startChapter: z.number().int().min(1).optional(),
     endChapter: z.number().int().min(1).optional(),
     concurrency: z.number().int().min(1).max(30).optional(),
     useHtmlStyle: z.boolean().default(false),
+    keepResumeCache: z.boolean().default(false),
     outputPath: z.string().trim().min(1).optional(),
   }),
   async (args) => {
@@ -197,7 +198,7 @@ registerTool(
     };
 
     return createTextResult(
-      `EPUB 已生成：${epub.book.bookName ?? epub.book.bookId}\n章节范围：${epub.chapterRange.start}-${epub.chapterRange.end}\n正文样式：${epub.contentStyle}\n批量请求数：${epub.batchInfo.requestCount}\n封面嵌入：${epub.coverEmbedded ? "yes" : "no"}\n输出文件：${epub.output.path}`,
+      `EPUB 已生成：${epub.book.bookName ?? epub.book.bookId}\n章节范围：${epub.chapterRange.start}-${epub.chapterRange.end}\n正文样式：${epub.contentStyle}\n实际请求批次：${epub.batchInfo.requestCount}/${epub.batchInfo.totalBatches ?? epub.batchInfo.requestCount}\n缓存命中批次：${epub.batchInfo.cacheHitBatches ?? 0}\n缓存命中章节：${epub.batchInfo.cachedChapters ?? 0}\n断点缓存：${epub.resumeCacheKept ? "保留" : "已清理"}\n封面嵌入：${epub.coverEmbedded ? "yes" : "no"}\n断点目录：${epub.resumeDir}\n输出文件：${epub.output.path}`,
       ensureStructuredContent(payload),
     );
   },
